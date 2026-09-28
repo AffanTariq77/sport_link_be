@@ -11,6 +11,8 @@ import { loadEnv } from './config.js';
 import { PaymentsController } from './payments/payments.controller.js';
 import { PaymentsService } from './payments/payments.service.js';
 import { MeController } from './users/me.controller.js';
+import { VendorsController } from './vendors/vendors.controller.js';
+import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
 import { DocumentCrypto } from './verification/document-crypto.js';
 import { LocalDiskStorage, STORAGE } from './verification/storage.js';
@@ -29,12 +31,14 @@ import { HealthController } from './health/health.controller.js';
     VenuesController,
     BookingsController,
     PaymentsController,
+    VendorsController,
   ],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },
     BookingsService,
     VenuesService,
     PaymentsService,
+    VendorsService,
     AuthService,
     AuthGuard,
     // SMS_PROVIDER only allows 'fake' until a provider is chosen; config refuses it in production.
