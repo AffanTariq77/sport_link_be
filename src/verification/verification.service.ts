@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ne } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
+import { hasPgCode, UNIQUE_VIOLATION } from '../db/errors.js';
 import { reports, users, verifications } from '../db/schema.js';
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from './document-crypto.js';
@@ -27,8 +28,6 @@ export interface DocumentImage {
   buffer: Buffer;
   size: number;
 }
-
-const UNIQUE_VIOLATION = '23505';
 
 // Check the file's first bytes rather than trusting the client's content type.
 const isImage = (b: Buffer) =>
@@ -111,7 +110,7 @@ export class VerificationService {
         ...keys,
       });
     } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
+      if (!hasPgCode(err, UNIQUE_VIOLATION)) throw err;
       await this.flagDuplicate(userId, hash, user.isMinor);
       throw new VerificationError(
         'DUPLICATE_DOCUMENT',
@@ -148,11 +147,4 @@ export class VerificationService {
       involvesMinor: isMinor,
     });
   }
-}
-
-function isUniqueViolation(err: unknown) {
-  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return true;
-  }
-  return false;
 }

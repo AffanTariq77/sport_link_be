@@ -22,6 +22,7 @@ Full spec: `docs/SPEC.md`. Business rules: `docs/FOUNDATION.md`. Read the releva
 - Auth (`src/auth`): phone OTP with a fake SMS provider (codes print to the API log), opaque hashed access and rotating refresh tokens with reuse detection, `AuthGuard`, `/auth/me`. OTP limits are settings. `DEV_OTP_CODE` fixes the code in development
 - Profile and ID (`src/users`, `src/verification`): `PATCH /me/profile` (date of birth sets `is_minor`, locked once a document is submitted), `GET`/`POST /me/verification` (CNIC for adults, B-Form for minors). Numbers and images encrypted with AES-256-GCM using keys derived from `DOCUMENT_KEY`, HMAC hash for duplicates. `verifications_active_doc_uq` blocks a document already pending or approved on any account; duplicates are flagged in `reports`. Storage behind `FileStorage` (local folder in development, S3 not added yet). Timing is the setting `verification.required_at`. Not built yet: guardian consent, admin review (approve, reject, audit-logged viewing)
 - Venues and holds (`src/venues`, `src/bookings/bookings.controller.ts`): `GET /sports`, `/venues` (sport and city filters), `/venues/:id` (courts, policy, accepted payment methods, never account details), `/courts/:id/slots?date=` (slots from opening hours, priced by the engine, availability matches `bookings_no_overlap`), `POST /bookings` (hold), `GET /bookings/mine`
+- Payments (`src/payments`): `GET`/`POST /bookings/:id/payment` (approved accounts with decrypted numbers, never cash as an account; method plus transaction ID moves the hold to `pending_payment` with `booking.payment_confirm_minutes`; pay at venue only when `allowUnpaidCash` or no advance, confirmed at once). Duplicate transaction IDs are rejected and flagged in `reports`. Vendor side: `GET /vendor/access`, `GET /vendor/payments`, `POST /vendor/payments/:id/confirm|reject` (owners, or staff with `confirm_payments` scoped by `branch_ids`; rows locked; rejection logged as a `payment_rejected` report until a disputes table exists). Account numbers encrypted with a key derived from `DOCUMENT_KEY`. Seed gives the demo vendor (sign in as 0300 0000001) fake approved accounts
 
 ## Decisions already made
 
@@ -63,7 +64,7 @@ Anything marked OPEN in the spec: build as a setting or feature flag, never hard
 ## Next steps (Phase 1)
 
 1. Auth: guardian consent flow for minors, admin review of verifications (phone OTP, sessions, profile and ID upload are done)
-2. Booking API: payment submission (shares, transaction ID) and vendor confirmation, split shares, cancellation and refunds, recurring series (venue browsing, slots and holds are done)
+2. Booking API: split shares between players (with matches), cancellation and refunds, recurring series, expiry notifications (browsing, holds, advance payment and vendor confirmation are done)
 3. Vendors: onboarding, branches, courts, price rules, policies, payment account approval, site visits
 4. Matches: create, filters, join requests, approval, shares
 5. Chat with phone number warning

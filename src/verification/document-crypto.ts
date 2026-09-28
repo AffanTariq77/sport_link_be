@@ -6,11 +6,13 @@ const VERSION = 1; // First byte of every ciphertext, so keys can be rotated lat
  * Field-level encryption for identity documents (spec 16): AES-256-GCM, with separate keys for
  * document numbers and images, and a keyed hash (HMAC) for duplicate detection. A plain hash of a
  * 13-digit number could be brute-forced; the HMAC cannot without the key.
+ * Vendor payment account numbers use their own derived key too.
  */
 export class DocumentCrypto {
   private readonly numberKey: Buffer;
   private readonly imageKey: Buffer;
   private readonly hashKey: Buffer;
+  private readonly accountKey: Buffer;
 
   constructor(masterKeyBase64: string) {
     const master = Buffer.from(masterKeyBase64, 'base64');
@@ -19,12 +21,16 @@ export class DocumentCrypto {
     this.numberKey = derive('document-number');
     this.imageKey = derive('document-image');
     this.hashKey = derive('document-hash');
+    this.accountKey = derive('payment-account');
   }
 
   encryptNumber = (docNumber: string) => this.encrypt(this.numberKey, Buffer.from(docNumber)).toString('base64');
   decryptNumber = (stored: string) => this.decrypt(this.numberKey, Buffer.from(stored, 'base64')).toString();
   encryptImage = (image: Buffer) => this.encrypt(this.imageKey, image);
   decryptImage = (stored: Buffer) => this.decrypt(this.imageKey, stored);
+  encryptAccount = (accountNumber: string) =>
+    this.encrypt(this.accountKey, Buffer.from(accountNumber)).toString('base64');
+  decryptAccount = (stored: string) => this.decrypt(this.accountKey, Buffer.from(stored, 'base64')).toString();
   hashNumber = (docNumber: string) => createHmac('sha256', this.hashKey).update(docNumber).digest('hex');
 
   private encrypt(key: Buffer, plain: Buffer) {

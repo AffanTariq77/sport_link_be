@@ -8,6 +8,8 @@ import { DEV_OTP, FakeSmsSender, SMS } from './auth/sms.js';
 import { BookingsController } from './bookings/bookings.controller.js';
 import { BookingsService } from './bookings/bookings.service.js';
 import { loadEnv } from './config.js';
+import { PaymentsController } from './payments/payments.controller.js';
+import { PaymentsService } from './payments/payments.service.js';
 import { MeController } from './users/me.controller.js';
 import { ProfileService } from './users/profile.service.js';
 import { DocumentCrypto } from './verification/document-crypto.js';
@@ -20,11 +22,19 @@ import { HealthController } from './health/health.controller.js';
 
 @Module({
   imports: [DbModule],
-  controllers: [HealthController, AuthController, MeController, VenuesController, BookingsController],
+  controllers: [
+    HealthController,
+    AuthController,
+    MeController,
+    VenuesController,
+    BookingsController,
+    PaymentsController,
+  ],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },
     BookingsService,
     VenuesService,
+    PaymentsService,
     AuthService,
     AuthGuard,
     // SMS_PROVIDER only allows 'fake' until a provider is chosen; config refuses it in production.

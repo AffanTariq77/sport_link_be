@@ -1,4 +1,7 @@
 // Local development seed. Fake data only: never real phone numbers, CNICs or payment details.
+import { eq } from 'drizzle-orm';
+import { loadEnv } from '../config.js';
+import { DocumentCrypto } from '../verification/document-crypto.js';
 import { createDb } from './client.js';
 import * as s from './schema.js';
 
@@ -43,7 +46,7 @@ const sports = await db
 if (sports.length) {
   const [owner] = await db
     .insert(s.users)
-    .values({ phone: '+920000000001', name: 'Demo Vendor', countryCode: 'PK', status: 'active' })
+    .values({ phone: '+923000000001', name: 'Demo Vendor', countryCode: 'PK', status: 'active' })
     .returning();
   const [vendor] = await db
     .insert(s.vendors)
@@ -83,6 +86,37 @@ if (sports.length) {
       { courtId: court!.id, dayType: 'weekday', startTime: '07:00', endTime: '17:00', pricePerHour: 400_000 },
       { courtId: court!.id, dayType: 'weekday', startTime: '17:00', endTime: '00:00', pricePerHour: 600_000 },
       { courtId: court!.id, dayType: 'weekend', startTime: '07:00', endTime: '00:00', pricePerHour: 700_000 },
+    ]);
+  }
+}
+
+// Demo vendor extras, safe to run on an existing database. The owner can sign in as 0300 0000001
+// (development OTP) to try Vendor mode. Account details are fake and obviously so.
+const [demo] = await db
+  .select({ vendorId: s.vendors.id, ownerId: s.vendors.ownerUserId })
+  .from(s.vendors)
+  .where(eq(s.vendors.businessName, 'Demo Sports Arena'));
+if (demo) {
+  await db.update(s.users).set({ phone: '+923000000001' }).where(eq(s.users.id, demo.ownerId));
+  const existing = await db.select().from(s.paymentAccounts).where(eq(s.paymentAccounts.vendorId, demo.vendorId));
+  if (!existing.length) {
+    const crypto = new DocumentCrypto(loadEnv().DOCUMENT_KEY);
+    const approved = { vendorId: demo.vendorId, status: 'approved' as const, approvedAt: new Date() };
+    await db.insert(s.paymentAccounts).values([
+      {
+        ...approved,
+        method: 'jazzcash',
+        accountTitle: 'Demo Sports Arena',
+        accountNumberEncrypted: crypto.encryptAccount('0300 0000000'),
+      },
+      {
+        ...approved,
+        method: 'bank_transfer',
+        accountTitle: 'Demo Sports Arena',
+        bankName: 'Demo Bank',
+        accountNumberEncrypted: crypto.encryptAccount('PK00 DEMO 0000 0000 0000 0000'),
+      },
+      { ...approved, method: 'cash', accountTitle: 'Pay at the front desk' },
     ]);
   }
 }
