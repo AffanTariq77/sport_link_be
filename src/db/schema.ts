@@ -503,6 +503,34 @@ export const bookingShares = pgTable('booking_shares', {
   ...timestamps,
 });
 
+export const refundStatus = pgEnum('refund_status', ['due', 'sent', 'received', 'disputed']);
+
+// One refund per paid share (Foundation 8.4): the vendor sends it directly and marks it sent, the player confirms.
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: id(),
+    bookingId: uuid('booking_id')
+      .notNull()
+      .references(() => bookings.id),
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => bookingShares.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    currency: text('currency').notNull(),
+    amount: money('amount').notNull(),
+    reason: text('reason').notNull(), // player_cancelled | vendor_cancelled | left_match | match_cancelled
+    status: refundStatus('status').notNull().default('due'),
+    vendorReference: text('vendor_reference'),
+    sentAt: ts('sent_at'),
+    confirmedAt: ts('confirmed_at'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('refunds_share_uq').on(t.shareId)],
+);
+
 // ---------- Matches ----------
 export const matches = pgTable(
   'matches',

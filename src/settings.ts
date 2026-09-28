@@ -25,6 +25,8 @@ export const DEFAULTS = {
   'booking.hold_minutes': 15,
   'booking.payment_confirm_minutes': 60,
   'booking.slot_step_minutes': 15,
+  // OPEN (spec 6.3): a vendor cancelling a confirmed booking refunds the player in full, whatever the policy.
+  'booking.vendor_cancel_full_refund': true,
   'billing.count_manual_bookings': true,
   // OPEN (spec 7.4): whether no-shows are billed like completed bookings.
   'billing.count_no_shows': true,

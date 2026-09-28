@@ -20,6 +20,8 @@ import { loadEnv } from './config.js';
 import { MatchesController } from './matches/matches.controller.js';
 import { MatchesService } from './matches/matches.service.js';
 import { PaymentsController } from './payments/payments.controller.js';
+import { RefundsController } from './refunds/refunds.controller.js';
+import { RefundsService } from './refunds/refunds.service.js';
 import { PaymentsService } from './payments/payments.service.js';
 import { MeController } from './users/me.controller.js';
 import { CalendarController } from './vendors/calendar.controller.js';
@@ -49,6 +51,7 @@ import { HealthController } from './health/health.controller.js';
     CalendarController,
     MatchesController,
     ChatController,
+    RefundsController,
     VendorBillingController,
     AdminBillingController,
     AdminAuthController,
@@ -63,6 +66,7 @@ import { HealthController } from './health/health.controller.js';
     CalendarService,
     MatchesService,
     ChatService,
+    RefundsService,
     BillingService,
     JobsService,
     StaffService,

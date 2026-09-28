@@ -21,6 +21,7 @@ import {
   verifications,
 } from '../db/schema.js';
 import { ageOn } from '../users/profile.service.js';
+import { refundShares } from '../refunds/refunds.service.js';
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
 
@@ -352,7 +353,19 @@ export class MatchesService {
     if (!m) throw new MatchError('NOT_FOUND', 'Match not found.');
     if (m.hostId !== hostId) throw new MatchError('NOT_HOST', 'Only the host can do this.');
     if (!['open', 'full'].includes(m.status)) throw new MatchError('CLOSED', 'This match can no longer be cancelled.');
-    await this.db.update(matches).set({ status: 'cancelled', updatedAt: now }).where(eq(matches.id, matchId));
+    await this.db.transaction(async (tx) => {
+      await tx.update(matches).set({ status: 'cancelled', updatedAt: now }).where(eq(matches.id, matchId));
+      // Joiners' paid shares are refunded as the booking policy allows (spec 8.2); the host keeps their booking.
+      const [booking] = await tx.select({ id: matches.bookingId }).from(matches).where(eq(matches.id, matchId));
+      const shareIds = (
+        await tx.select({ shareId: matchPlayers.shareId }).from(matchPlayers).where(eq(matchPlayers.matchId, matchId))
+      )
+        .map((r) => r.shareId)
+        .filter((id): id is string => !!id);
+      if (booking?.id && shareIds.length) {
+        await refundShares(tx, { bookingId: booking.id, shareIds, reason: 'match_cancelled', full: false, now });
+      }
+    });
     return { status: 'cancelled' as const };
   }
 
@@ -552,12 +565,19 @@ export class MatchesService {
         .update(matchPlayers)
         .set({ status, updatedAt: now })
         .where(and(eq(matchPlayers.matchId, matchId), eq(matchPlayers.userId, userId)));
-      // An unpaid share is void; a paid one stays for the refund, which follows the booking policy.
+      // An unpaid share is voided; a paid one is refunded if the booking policy allows (spec 8.2).
       if (p.shareId) {
-        await tx
-          .update(bookingShares)
-          .set({ status: 'void', updatedAt: now })
-          .where(and(eq(bookingShares.id, p.shareId), inArray(bookingShares.status, ['pending', 'rejected'])));
+        const [share] = await tx
+          .select({ bookingId: bookingShares.bookingId })
+          .from(bookingShares)
+          .where(eq(bookingShares.id, p.shareId));
+        await refundShares(tx, {
+          bookingId: share!.bookingId,
+          shareIds: [p.shareId],
+          reason: 'left_match',
+          full: false,
+          now,
+        });
       }
       await refreshMatchStatus(tx, matchId);
       return { status };
