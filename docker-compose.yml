@@ -1,0 +1,17 @@
+# Local development only. Credentials here are local defaults, not production values.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sportslink
+    ports: ['${DB_PORT:-5432}:5432']
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+  redis:
+    image: redis:7
+    ports: ['${REDIS_PORT:-6379}:6379']
+volumes:
+  pgdata:
