@@ -504,28 +504,32 @@ export const bookingShares = pgTable('booking_shares', {
 });
 
 // ---------- Matches ----------
-export const matches = pgTable('matches', {
-  id: id(),
-  hostId: uuid('host_id')
-    .notNull()
-    .references(() => users.id),
-  sportId: uuid('sport_id')
-    .notNull()
-    .references(() => sports.id),
-  bookingId: uuid('booking_id').references(() => bookings.id),
-  // Unlisted venue: no booking, free-text address plus approximate point.
-  unlistedVenueName: text('unlisted_venue_name'),
-  unlistedVenueAddress: text('unlisted_venue_address'),
-  location: geographyPoint('location'),
-  startAt: ts('start_at').notNull(),
-  endAt: ts('end_at').notNull(),
-  slotsTotal: smallint('slots_total').notNull(),
-  hostBrings: smallint('host_brings').notNull().default(1),
-  filters: jsonb('filters').notNull().default({}), // rating range, age range, gender, verifiedOnly
-  status: matchStatus('status').notNull().default('open'),
-  joinCutoffAt: ts('join_cutoff_at'),
-  ...timestamps,
-});
+export const matches = pgTable(
+  'matches',
+  {
+    id: id(),
+    hostId: uuid('host_id')
+      .notNull()
+      .references(() => users.id),
+    sportId: uuid('sport_id')
+      .notNull()
+      .references(() => sports.id),
+    bookingId: uuid('booking_id').references(() => bookings.id),
+    // Unlisted venue: no booking, free-text address plus approximate point.
+    unlistedVenueName: text('unlisted_venue_name'),
+    unlistedVenueAddress: text('unlisted_venue_address'),
+    location: geographyPoint('location'),
+    startAt: ts('start_at').notNull(),
+    endAt: ts('end_at').notNull(),
+    slotsTotal: smallint('slots_total').notNull(),
+    hostBrings: smallint('host_brings').notNull().default(1),
+    filters: jsonb('filters').notNull().default({}), // rating range, age range, gender, verifiedOnly
+    status: matchStatus('status').notNull().default('open'),
+    joinCutoffAt: ts('join_cutoff_at'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('matches_booking_uq').on(t.bookingId)], // one match per booking
+);
 
 export const matchPlayers = pgTable(
   'match_players',

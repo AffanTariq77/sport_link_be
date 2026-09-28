@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "matches_booking_uq" ON "matches" USING btree ("booking_id");

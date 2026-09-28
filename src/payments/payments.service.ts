@@ -7,6 +7,7 @@ import { hasPgCode, UNIQUE_VIOLATION } from '../db/errors.js';
 import {
   bookings,
   bookingShares,
+  matchPlayers,
   branches,
   courts,
   paymentAccounts,
@@ -17,6 +18,7 @@ import {
 } from '../db/schema.js';
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
+import { refreshMatchStatus } from '../matches/matches.service.js';
 import { vendorAccess } from '../vendors/access.js';
 
 export class PaymentError extends Error {
@@ -237,6 +239,13 @@ export class PaymentsService {
       if (Number(paid!.sum) >= booking.advanceDue) {
         await tx.update(bookings).set({ status: 'confirmed', updatedAt: now }).where(eq(bookings.id, booking.id));
       }
+      // A match player's paid share confirms their place (spec 8.1: confirmed = share paid).
+      const [joiner] = await tx
+        .update(matchPlayers)
+        .set({ status: 'confirmed', updatedAt: now })
+        .where(and(eq(matchPlayers.shareId, share.id), eq(matchPlayers.status, 'approved')))
+        .returning({ matchId: matchPlayers.matchId });
+      if (joiner) await refreshMatchStatus(tx, joiner.matchId);
     });
   }
 
@@ -277,7 +286,13 @@ export class PaymentsService {
       if (!row || !branchIds.includes(row.branchId)) throw new PaymentError('NOT_FOUND', 'Payment not found.');
       if (row.share.status !== 'submitted')
         throw new PaymentError('NOT_SUBMITTED', 'This payment was already handled.');
-      if (effectiveStatus(row.booking, now) !== 'pending_payment') {
+      // A match player's share is paid after the host has secured the booking, so its booking may be confirmed.
+      const [joiner] = await tx
+        .select({ matchId: matchPlayers.matchId })
+        .from(matchPlayers)
+        .where(eq(matchPlayers.shareId, shareId));
+      const status = effectiveStatus(row.booking, now);
+      if (status !== 'pending_payment' && !(joiner && status === 'confirmed')) {
         throw new PaymentError('BOOKING_EXPIRED', 'This booking expired before the payment was checked.');
       }
       await apply(tx, row.share, row.booking);

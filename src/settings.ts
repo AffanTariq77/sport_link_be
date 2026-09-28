@@ -37,6 +37,8 @@ export const DEFAULTS = {
   // OPEN (spec 5): CNIC at sign-up, or only before creating, joining or using Find Players.
   'verification.required_at': 'signup' as 'signup' | 'before_participation',
   'verification.max_image_bytes': 5_000_000,
+  // Spec 8.1: join requests close this long before the start.
+  'match.join_cutoff_minutes': 120,
   'admin.session_hours': 8,
   'admin.max_failed_logins': 5,
   'admin.lockout_minutes': 15,

@@ -12,6 +12,8 @@ import { DEV_OTP, FakeSmsSender, SMS } from './auth/sms.js';
 import { BookingsController } from './bookings/bookings.controller.js';
 import { BookingsService } from './bookings/bookings.service.js';
 import { loadEnv } from './config.js';
+import { MatchesController } from './matches/matches.controller.js';
+import { MatchesService } from './matches/matches.service.js';
 import { PaymentsController } from './payments/payments.controller.js';
 import { PaymentsService } from './payments/payments.service.js';
 import { MeController } from './users/me.controller.js';
@@ -40,6 +42,7 @@ import { HealthController } from './health/health.controller.js';
     PaymentsController,
     VendorsController,
     CalendarController,
+    MatchesController,
     AdminAuthController,
     AdminController,
   ],
@@ -50,6 +53,7 @@ import { HealthController } from './health/health.controller.js';
     PaymentsService,
     VendorsService,
     CalendarService,
+    MatchesService,
     StaffService,
     AdminAuthService,
     AdminService,
