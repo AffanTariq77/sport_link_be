@@ -3,6 +3,8 @@ type Req = { ip?: string; path: string };
 type Res = { setHeader(name: string, value: string): void; status(code: number): { json(body: unknown): void } };
 type Next = () => void;
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
 /**
  * Security headers for a JSON API (spec 16). No CORS headers: browsers never call the API directly (the web apps
  * call it from their servers, the mobile app is not a browser), so cross-origin requests stay blocked.
@@ -37,6 +39,9 @@ export function rateLimit(opts: { windowMs: number; general: number; auth: numbe
       lastSweep = t;
     }
     const key = req.ip ?? 'unknown';
+    // Our own web and admin servers call from this machine on behalf of many users; one shared budget would lock
+    // everyone out. ponytail: have them forward the client IP (X-Forwarded-For) and count that instead.
+    if (LOOPBACK.has(key)) return next();
     const entry = hits.get(key);
     const window = entry && t - entry.start < opts.windowMs ? entry : { start: t, general: 0, auth: 0 };
     window.general++;

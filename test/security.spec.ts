@@ -40,6 +40,8 @@ describe('rate limit', () => {
     ]).toEqual([200, 200, 429]);
     t = 60_001;
     expect(call('1.1.1.1')).toBe(200);
+    // The web and admin servers on this machine are not counted as one client.
+    expect(Array.from({ length: 10 }, () => call('127.0.0.1')).every((s) => s === 200)).toBe(true);
   });
 });
 
