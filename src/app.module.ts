@@ -9,7 +9,10 @@ import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
 import { DEV_OTP, FakeSmsSender, SMS } from './auth/sms.js';
+import { AdminBillingController, VendorBillingController } from './billing/billing.controller.js';
+import { BillingService } from './billing/billing.service.js';
 import { BookingsController } from './bookings/bookings.controller.js';
+import { JobsService } from './jobs/jobs.service.js';
 import { ChatController } from './chat/chat.controller.js';
 import { ChatService } from './chat/chat.service.js';
 import { BookingsService } from './bookings/bookings.service.js';
@@ -46,6 +49,8 @@ import { HealthController } from './health/health.controller.js';
     CalendarController,
     MatchesController,
     ChatController,
+    VendorBillingController,
+    AdminBillingController,
     AdminAuthController,
     AdminController,
   ],
@@ -58,6 +63,8 @@ import { HealthController } from './health/health.controller.js';
     CalendarService,
     MatchesService,
     ChatService,
+    BillingService,
+    JobsService,
     StaffService,
     AdminAuthService,
     AdminService,

@@ -26,6 +26,16 @@ export const DEFAULTS = {
   'booking.payment_confirm_minutes': 60,
   'booking.slot_step_minutes': 15,
   'billing.count_manual_bookings': true,
+  // OPEN (spec 7.4): whether no-shows are billed like completed bookings.
+  'billing.count_no_shows': true,
+  'billing.due_days': 7,
+  // Overdue ladder, days after the invoice is issued (Foundation 8.5).
+  'billing.reminder_days': 7,
+  'billing.warning_days': 14,
+  'billing.hide_days': 21,
+  'billing.block_days': 30,
+  // Where vendors pay SportsLink, shown on every invoice (Foundation 8.5). Set by admins; empty until then.
+  'billing.pay_to': '' as string,
   'calendar.weekend_days': [0, 6], // 0 = Sunday
   'auth.otp_ttl_seconds': 300,
   'auth.otp_resend_seconds': 60,
