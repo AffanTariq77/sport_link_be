@@ -4,10 +4,11 @@ import { userColumns } from '../auth/auth.service.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { gender, users, verifications } from '../db/schema.js';
+import { getSetting } from '../settings.js';
 
 export class ProfileError extends Error {
   constructor(
-    public readonly code: 'INVALID_DOB' | 'DOB_LOCKED',
+    public readonly code: 'INVALID_DOB' | 'DOB_LOCKED' | 'TOO_YOUNG',
     message: string,
   ) {
     super(message);
@@ -40,6 +41,10 @@ export class ProfileService {
     }
     const age = ageOn(input.dob, now);
     if (age > 120) throw new ProfileError('INVALID_DOB', 'Enter a real date of birth.');
+    // Foundation 10.2 safeguard (setting): under-13s only through a parent's account.
+    if (age < (await getSetting(this.db, 'minors.minimum_age'))) {
+      throw new ProfileError('TOO_YOUNG', 'Players under 13 need a parent to use their own account for them.');
+    }
 
     const [current] = await this.db.select({ dob: users.dob }).from(users).where(eq(users.id, userId));
     if (current?.dob && current.dob !== input.dob) {

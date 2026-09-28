@@ -150,7 +150,9 @@ export class AdminBillingController {
   @HttpCode(200)
   @Permission('billing.manage')
   @ApiOkResponse({
-    standardSchema: z.object({ completed: z.int(), issued: z.int(), ladder: z.int(), reinstated: z.int() }).nullable(),
+    standardSchema: z
+      .object({ completed: z.int(), issued: z.int(), ladder: z.int(), reinstated: z.int(), turned18: z.int() })
+      .nullable(),
   })
   runNow() {
     return this.jobs.runAll();

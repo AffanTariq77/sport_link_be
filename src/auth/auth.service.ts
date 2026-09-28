@@ -20,7 +20,7 @@ export class AuthError extends Error {
 
 export interface AuthContext {
   sessionId: string;
-  user: { id: string; name: string | null; status: string; isMinor: boolean; countryCode: string };
+  user: { id: string; name: string | null; status: string; isMinor: boolean; countryCode: string; locked: boolean };
 }
 
 const BLOCKED = new Set(['suspended', 'banned', 'deleted']);
@@ -38,6 +38,8 @@ export const userColumns = {
   status: users.status,
   isMinor: users.isMinor,
   countryCode: users.countryCode,
+  // Spec 5: a minor's account stays locked until a guardian accepts consent.
+  locked: sql<boolean>`(${users.isMinor} and ${users.guardianConsentAt} is null)`,
 };
 
 // ponytail: rate limits are per phone only. Per IP and per device limits (spec 5, 16) belong in a

@@ -23,6 +23,8 @@ import { PaymentsController } from './payments/payments.controller.js';
 import { RefundsController } from './refunds/refunds.controller.js';
 import { RefundsService } from './refunds/refunds.service.js';
 import { PaymentsService } from './payments/payments.service.js';
+import { GuardianController } from './users/guardian.controller.js';
+import { GuardianService } from './users/guardian.service.js';
 import { MeController } from './users/me.controller.js';
 import { CalendarController } from './vendors/calendar.controller.js';
 import { CalendarService } from './vendors/calendar.service.js';
@@ -44,6 +46,7 @@ import { HealthController } from './health/health.controller.js';
     HealthController,
     AuthController,
     MeController,
+    GuardianController,
     VenuesController,
     BookingsController,
     PaymentsController,
@@ -80,6 +83,7 @@ import { HealthController } from './health/health.controller.js';
     { provide: SMS, useClass: FakeSmsSender },
     { provide: DEV_OTP, useFactory: () => loadEnv().DEV_OTP_CODE },
     ProfileService,
+    GuardianService,
     VerificationService,
     { provide: DocumentCrypto, useFactory: () => new DocumentCrypto(loadEnv().DOCUMENT_KEY) },
     // STORAGE_DRIVER only allows 'local' until S3 is added; config refuses it in production.

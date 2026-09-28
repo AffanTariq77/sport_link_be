@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagge
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
+import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { bookingStatus, paymentMethod, shareStatus } from '../db/schema.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -114,6 +115,7 @@ export class PaymentsController {
     return run(() => this.payments.payInfo(id, req.auth.user.id));
   }
 
+  @UseGuards(UnlockedGuard)
   @Post('bookings/:id/payment')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: PaymentResult })

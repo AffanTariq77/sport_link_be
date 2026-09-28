@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagge
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
+import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { advanceType, dayType, listingStatus, paymentMethod, reviewStatus, vendorStatus } from '../db/schema.js';
 import { VendorError, VendorsService } from './vendors.service.js';
 
@@ -187,6 +188,7 @@ export class VendorsController {
     return this.vendors.setup(req.auth.user.id);
   }
 
+  @UseGuards(UnlockedGuard)
   @Post('apply')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: Vendor })

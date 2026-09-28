@@ -17,6 +17,7 @@ import {
   sports,
   users,
 } from '../db/schema.js';
+import { getSetting } from '../settings.js';
 import { vendorAccess } from '../vendors/access.js';
 import { containsPhoneNumber } from './phone-detect.js';
 
@@ -286,6 +287,11 @@ export class ChatService {
       .innerJoin(courts, eq(courts.id, bookings.courtId))
       .where(eq(bookings.id, bookingId));
     if (!b || b.source !== 'app') throw new ChatError('NOT_FOUND', 'Chat not found.');
+    // Foundation 10.2 safeguard (setting): minors chat only in match group chats, not privately with adults.
+    const [booker] = await this.db.select({ isMinor: users.isMinor }).from(users).where(eq(users.id, b.createdBy!));
+    if (booker?.isMinor && (await getSetting(this.db, 'minors.block_private_chat'))) {
+      throw new ChatError('NOT_FOUND', 'Private chats are not available for players under 18.');
+    }
     if (b.createdBy === userId) return;
     const { branchIds } = await vendorAccess(this.db, userId, 'view_bookings');
     if (!branchIds.includes(b.branchId)) throw new ChatError('NOT_FOUND', 'Chat not found.');

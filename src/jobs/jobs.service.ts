@@ -5,6 +5,7 @@ import { loadEnv } from '../config.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { auditLog, moderationActions, users } from '../db/schema.js';
+import { GuardianService } from '../users/guardian.service.js';
 
 const EVERY_MS = 5 * 60_000;
 const LOCK_KEY = 7_411_203; // any constant shared by every API instance
@@ -22,6 +23,7 @@ export class JobsService implements OnApplicationBootstrap, OnApplicationShutdow
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(BillingService) private readonly billing: BillingService,
+    @Inject(GuardianService) private readonly guardians: GuardianService,
   ) {}
 
   onApplicationBootstrap() {
@@ -46,8 +48,9 @@ export class JobsService implements OnApplicationBootstrap, OnApplicationShutdow
           ...(await this.billing.issueMonthlyInvoices(now)),
           ladder: (await this.billing.runOverdueLadder(now)).done.length,
           ...(await this.endExpiredSuspensions(now)),
+          ...(await this.guardians.endGuardianshipAt18(now)),
         };
-        if (result.completed || result.issued || result.ladder || result.reinstated)
+        if (result.completed || result.issued || result.ladder || result.reinstated || result.turned18)
           this.log.log(JSON.stringify(result));
         return result;
       });

@@ -39,7 +39,7 @@ const VerificationStatus = z
   })
   .meta({ id: 'VerificationStatus' });
 
-const PROFILE_STATUS: Record<ProfileError['code'], number> = { INVALID_DOB: 400, DOB_LOCKED: 409 };
+const PROFILE_STATUS: Record<ProfileError['code'], number> = { INVALID_DOB: 400, DOB_LOCKED: 409, TOO_YOUNG: 400 };
 const VERIFICATION_STATUS: Record<VerificationError['code'], number> = {
   PROFILE_INCOMPLETE: 409,
   INVALID_DOCUMENT_NUMBER: 400,

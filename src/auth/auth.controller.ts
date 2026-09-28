@@ -30,6 +30,7 @@ export const User = z
     status: z.enum(userStatus.enumValues),
     isMinor: z.boolean(),
     countryCode: z.string(),
+    locked: z.boolean().meta({ description: 'Minor waiting for guardian consent' }),
   })
   .meta({ id: 'User' });
 const Tokens = z

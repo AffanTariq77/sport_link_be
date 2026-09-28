@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagge
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
+import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { advanceType, bookingStatus } from '../db/schema.js';
 import { BookingError, BookingsService, effectiveStatus } from './bookings.service.js';
 
@@ -52,6 +53,7 @@ export class BookingsController {
   constructor(@Inject(BookingsService) private readonly bookings: BookingsService) {}
 
   /** Holds a slot for the player (setting booking.hold_minutes) while they pay the advance. */
+  @UseGuards(UnlockedGuard)
   @Post()
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: Hold })

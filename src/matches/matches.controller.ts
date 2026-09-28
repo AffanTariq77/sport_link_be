@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagge
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
+import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { gender, matchPlayerStatus, matchStatus, paymentMethod, shareStatus } from '../db/schema.js';
 import { MatchError, MatchesService } from './matches.service.js';
 
@@ -117,6 +118,7 @@ const MatchPay = z
 export class MatchesController {
   constructor(@Inject(MatchesService) private readonly matches: MatchesService) {}
 
+  @UseGuards(UnlockedGuard)
   @Post()
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: z.object({ id: z.uuid() }) })
@@ -154,6 +156,7 @@ export class MatchesController {
     return run(() => this.matches.get(req.auth.user.id, id));
   }
 
+  @UseGuards(UnlockedGuard)
   @Post(':id/join')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: PlayerStatus })
@@ -209,6 +212,7 @@ export class MatchesController {
     return run(() => this.matches.payInfo(req.auth.user.id, id));
   }
 
+  @UseGuards(UnlockedGuard)
   @Post(':id/pay')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: z.object({ shareStatus: z.enum(shareStatus.enumValues) }) })

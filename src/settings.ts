@@ -49,6 +49,11 @@ export const DEFAULTS = {
   // OPEN (spec 5): CNIC at sign-up, or only before creating, joining or using Find Players.
   'verification.required_at': 'signup' as 'signup' | 'before_participation',
   'verification.max_image_bytes': 5_000_000,
+  // Minor safeguards (Foundation 10.2). OPEN: each is a switch until the owner decides; defaults follow the
+  // Foundation's recommendation.
+  'minors.minimum_age': 13,
+  'minors.block_private_chat': true,
+  'minors.consent_version': '2026-09-v1' as string,
   // Spec 8.1: join requests close this long before the start.
   'match.join_cutoff_minutes': 120,
   'admin.session_hours': 8,

@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagge
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
+import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { conversationType } from '../db/schema.js';
 import { ChatError, ChatService } from './chat.service.js';
 
@@ -62,6 +63,7 @@ export class ChatController {
     return this.chat.list(req.auth.user.id);
   }
 
+  @UseGuards(UnlockedGuard)
   @Post('conversations/match/:matchId')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: Opened })
@@ -69,6 +71,7 @@ export class ChatController {
     return run(() => this.chat.openMatch(req.auth.user.id, matchId));
   }
 
+  @UseGuards(UnlockedGuard)
   @Post('conversations/booking/:bookingId')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: Opened })
@@ -86,6 +89,7 @@ export class ChatController {
     return run(() => this.chat.messages(req.auth.user.id, id, q.after ? new Date(q.after) : undefined));
   }
 
+  @UseGuards(UnlockedGuard)
   @Post('conversations/:id/messages')
   @HttpCode(200)
   @ApiOkResponse({
