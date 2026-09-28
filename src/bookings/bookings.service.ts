@@ -83,13 +83,16 @@ export class BookingsService {
   }
 
   /** Vendor books a walk-in or phone customer. Confirmed immediately. */
-  async createManual(input: SlotInput & { staffUserId: string; customerName: string; now?: Date }) {
+  async createManual(
+    input: SlotInput & { staffUserId: string; customerName: string; customerPhoneEncrypted?: string; now?: Date },
+  ) {
     const now = input.now ?? new Date();
     return this.insert(input, now, async (tx, ctx) => ({
       source: 'manual' as const,
       status: 'confirmed' as const,
       createdBy: input.staffUserId,
       manualCustomerName: input.customerName,
+      manualCustomerPhoneEncrypted: input.customerPhoneEncrypted ?? null,
       countsForBilling: await getSetting(tx, 'billing.count_manual_bookings', ctx.countryCode),
     }));
   }

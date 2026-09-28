@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
 import { bookingStatus, paymentMethod, shareStatus } from '../db/schema.js';
+import { DB } from '../db/db.module.js';
+import type { Db } from '../db/client.js';
+import { vendorAccess } from '../vendors/access.js';
 import { PaymentError, PaymentsService } from './payments.service.js';
 
 const STATUS: Record<PaymentError['code'], number> = {
@@ -63,7 +66,7 @@ const VendorAccess = z
       z.object({
         id: z.uuid(),
         businessName: z.string(),
-        branches: z.array(z.object({ id: z.uuid(), name: z.string() })),
+        branches: z.array(z.object({ id: z.uuid(), name: z.string(), timezone: z.string() })),
       }),
     ),
   })
@@ -100,7 +103,10 @@ const Handled = z.object({ id: z.uuid() }).meta({ id: 'PaymentHandled' });
 @ApiBearerAuth()
 @ApiDefaultResponse({ description: 'Error', standardSchema: ApiError })
 export class PaymentsController {
-  constructor(@Inject(PaymentsService) private readonly payments: PaymentsService) {}
+  constructor(
+    @Inject(PaymentsService) private readonly payments: PaymentsService,
+    @Inject(DB) private readonly db: Db,
+  ) {}
 
   @Get('bookings/:id/payment')
   @ApiOkResponse({ standardSchema: PayInfo })
@@ -123,7 +129,12 @@ export class PaymentsController {
   @Get('vendor/access')
   @ApiOkResponse({ standardSchema: VendorAccess })
   async access(@Req() req: AuthedRequest) {
-    return { vendors: (await this.payments.vendorAccess(req.auth.user.id)).vendors };
+    const [bookingsAccess, paymentsAccess] = await Promise.all([
+      vendorAccess(this.db, req.auth.user.id, 'view_bookings'),
+      this.payments.vendorAccess(req.auth.user.id),
+    ]);
+    const merged = new Map([...paymentsAccess.vendors, ...bookingsAccess.vendors].map((v) => [v.id, v]));
+    return { vendors: [...merged.values()] };
   }
 
   @Get('vendor/payments')

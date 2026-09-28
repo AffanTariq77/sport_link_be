@@ -15,6 +15,9 @@ import { loadEnv } from './config.js';
 import { PaymentsController } from './payments/payments.controller.js';
 import { PaymentsService } from './payments/payments.service.js';
 import { MeController } from './users/me.controller.js';
+import { CalendarController } from './vendors/calendar.controller.js';
+import { CalendarService } from './vendors/calendar.service.js';
+import { StaffService } from './vendors/staff.service.js';
 import { VendorsController } from './vendors/vendors.controller.js';
 import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
@@ -36,6 +39,7 @@ import { HealthController } from './health/health.controller.js';
     BookingsController,
     PaymentsController,
     VendorsController,
+    CalendarController,
     AdminAuthController,
     AdminController,
   ],
@@ -45,6 +49,8 @@ import { HealthController } from './health/health.controller.js';
     VenuesService,
     PaymentsService,
     VendorsService,
+    CalendarService,
+    StaffService,
     AdminAuthService,
     AdminService,
     AdminGuard,

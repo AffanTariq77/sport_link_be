@@ -14,6 +14,7 @@ export class DocumentCrypto {
   private readonly hashKey: Buffer;
   private readonly accountKey: Buffer;
   private readonly totpKey: Buffer;
+  private readonly phoneKey: Buffer;
 
   constructor(masterKeyBase64: string) {
     const master = Buffer.from(masterKeyBase64, 'base64');
@@ -24,6 +25,7 @@ export class DocumentCrypto {
     this.hashKey = derive('document-hash');
     this.accountKey = derive('payment-account');
     this.totpKey = derive('admin-totp');
+    this.phoneKey = derive('customer-phone');
   }
 
   encryptNumber = (docNumber: string) => this.encrypt(this.numberKey, Buffer.from(docNumber)).toString('base64');
@@ -33,6 +35,9 @@ export class DocumentCrypto {
   encryptAccount = (accountNumber: string) =>
     this.encrypt(this.accountKey, Buffer.from(accountNumber)).toString('base64');
   decryptAccount = (stored: string) => this.decrypt(this.accountKey, Buffer.from(stored, 'base64')).toString();
+  // Walk-in customer phone numbers on manual bookings: private to the vendor, never shown to players.
+  encryptPhone = (phone: string) => this.encrypt(this.phoneKey, Buffer.from(phone)).toString('base64');
+  decryptPhone = (stored: string) => this.decrypt(this.phoneKey, Buffer.from(stored, 'base64')).toString();
   encryptTotp = (secret: string) => this.encrypt(this.totpKey, Buffer.from(secret)).toString('base64');
   decryptTotp = (stored: string) => this.decrypt(this.totpKey, Buffer.from(stored, 'base64')).toString();
   hashNumber = (docNumber: string) => createHmac('sha256', this.hashKey).update(docNumber).digest('hex');

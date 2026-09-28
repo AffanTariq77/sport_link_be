@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayContains, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -14,10 +14,10 @@ import {
   reports,
   users,
   vendors,
-  vendorStaff,
 } from '../db/schema.js';
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
+import { vendorAccess } from '../vendors/access.js';
 
 export class PaymentError extends Error {
   constructor(
@@ -42,7 +42,6 @@ type Policy = { allowUnpaidCash?: boolean };
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 const REFERENCE = /^[A-Za-z0-9-]{4,40}$/;
-const CONFIRMERS = ['confirm_payments']; // vendor_staff permission (spec 13.2); owners can always confirm
 
 @Injectable()
 export class PaymentsService {
@@ -180,46 +179,8 @@ export class PaymentsService {
   }
 
   /** Branches this user can confirm payments for: owned vendors, or staff with the permission. */
-  async vendorAccess(userId: string) {
-    const owned = await this.db
-      .select({ vendorId: vendors.id, businessName: vendors.businessName })
-      .from(vendors)
-      .where(and(eq(vendors.ownerUserId, userId), inArray(vendors.status, ['approved', 'suspended', 'blocked'])));
-    const staffed = await this.db
-      .select({ vendorId: vendors.id, businessName: vendors.businessName, branchIds: vendorStaff.branchIds })
-      .from(vendorStaff)
-      .innerJoin(vendors, eq(vendors.id, vendorStaff.vendorId))
-      .where(
-        and(
-          eq(vendorStaff.userId, userId),
-          eq(vendorStaff.active, true),
-          arrayContains(vendorStaff.permissions, CONFIRMERS),
-          inArray(vendors.status, ['approved', 'suspended', 'blocked']),
-        ),
-      );
-    const scopes = [...owned.map((o) => ({ ...o, branchIds: [] as string[] })), ...staffed];
-    if (!scopes.length) return { vendors: [], branchIds: [] as string[] };
-    const allBranches = await this.db
-      .select({ id: branches.id, vendorId: branches.vendorId, name: branches.name })
-      .from(branches)
-      .where(
-        inArray(
-          branches.vendorId,
-          scopes.map((s) => s.vendorId),
-        ),
-      );
-    // Staff with an empty branch list cover every branch of their vendor.
-    const allowed = allBranches.filter((b) =>
-      scopes.some((s) => s.vendorId === b.vendorId && (!s.branchIds.length || s.branchIds.includes(b.id))),
-    );
-    return {
-      vendors: scopes.map((s) => ({
-        id: s.vendorId,
-        businessName: s.businessName,
-        branches: allowed.filter((b) => b.vendorId === s.vendorId).map((b) => ({ id: b.id, name: b.name })),
-      })),
-      branchIds: allowed.map((b) => b.id),
-    };
+  vendorAccess(userId: string) {
+    return vendorAccess(this.db, userId, 'confirm_payments');
   }
 
   /** Vendor's queue of payments waiting to be checked against their account. */
