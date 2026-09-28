@@ -10,13 +10,26 @@ Node.js 22 or later, pnpm 9, Docker.
 ## Getting started
 
 ```bash
-cp .env.example .env
+cp .env.example .env        # then set DOCUMENT_KEY: openssl rand -base64 32
 docker compose up -d        # Postgres with PostGIS, Redis, plus a sportslink_test database
 pnpm install
 pnpm db:migrate
 pnpm db:seed                # fake demo data only
-pnpm dev                    # http://localhost:3000/health
+pnpm dev                    # http://localhost:3000/health, API docs at /docs
 ```
+
+If ports 5432, 6379 or 3000 are taken, set `DB_PORT`, `REDIS_PORT` and `PORT` in `.env` (and the matching
+`DATABASE_URL`).
+
+### Development sign-in
+
+- Players: any Pakistani mobile number. Codes print in the API log; set `DEV_OTP_CODE=123456` in `.env` to use a
+  fixed code.
+- Demo vendor (from the seed): `0300 0000001`.
+- Admin panel: set `DEV_ADMIN_EMAIL`, `DEV_ADMIN_PASSWORD` and `DEV_TOTP_CODE` in `.env` and run `pnpm db:seed`, or
+  create a real admin with `pnpm admin:create <email> "<name>" <role>` (prints the authenticator secret).
+
+The development codes are refused when `NODE_ENV=production`.
 
 ## Scripts
 
@@ -29,6 +42,7 @@ pnpm dev                    # http://localhost:3000/health
 | `pnpm db:generate`            | Create a migration from changes to `src/db/schema.ts`         |
 | `pnpm db:migrate`             | Apply migrations                                              |
 | `pnpm db:seed`                | Load fake demo data (refuses to run in production)            |
+| `pnpm admin:create`           | Create an admin with a password and two-factor secret         |
 
 ## Layout
 

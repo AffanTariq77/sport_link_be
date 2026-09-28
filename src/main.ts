@@ -4,11 +4,15 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { loadEnv } from './config.js';
+import { rateLimit, securityHeaders } from './security/http.js';
 
 const env = loadEnv();
 const app = await NestFactory.create<NestExpressApplication>(AppModule);
 // Trust X-Forwarded-For only from this machine (the web and admin servers), so audit IPs are the real client.
 app.set('trust proxy', 'loopback');
+app.disable('x-powered-by');
+app.use(securityHeaders(env.NODE_ENV === 'production'));
+app.use(rateLimit({ windowMs: 60_000, general: 300, auth: 20 }));
 app.enableShutdownHooks();
 // OpenAPI spec for sport_link_fe's generated client: UI at /docs, JSON at /docs-json. Not served in production.
 if (env.NODE_ENV !== 'production') {
