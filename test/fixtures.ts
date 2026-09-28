@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { createDb, type Db } from '../src/db/client.js';
 import * as s from '../src/db/schema.js';
 
@@ -8,6 +10,9 @@ export const at = (local: string) => new Date(`${local}:00+05:00`);
 export const NOW = at('2029-12-01T12:00');
 
 let counter = 0;
+
+// Fake and unique across test files (they share one database, and each file restarts `counter`).
+const fakePhone = () => `+9200${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;
 
 export async function ensurePakistan(db: Db) {
   await db
@@ -30,7 +35,7 @@ export async function createVenue(db: Db) {
   await ensurePakistan(db);
   const [user] = await db
     .insert(s.users)
-    .values({ phone: `+920000000${String(n).padStart(3, '0')}`, countryCode: 'PK', status: 'active' })
+    .values({ phone: fakePhone(), countryCode: 'PK', status: 'active' })
     .returning();
   const [vendor] = await db
     .insert(s.vendors)
@@ -56,6 +61,12 @@ export async function createVenue(db: Db) {
     .returning();
   await db.insert(s.venuePolicies).values({ branchId: branch!.id, advanceType: 'percentage', advanceValue: 2000 });
   const [court] = await db.insert(s.courts).values({ branchId: branch!.id, name: 'Court 1' }).returning();
+  await db
+    .insert(s.sports)
+    .values({ slug: 'padel', name: 'Padel', teamSizeMin: 2, teamSizeMax: 2 })
+    .onConflictDoNothing();
+  const [padel] = await db.select({ id: s.sports.id }).from(s.sports).where(eq(s.sports.slug, 'padel'));
+  await db.insert(s.courtSports).values({ courtId: court!.id, sportId: padel!.id });
   await db
     .insert(s.openingHours)
     .values(

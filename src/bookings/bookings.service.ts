@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, lt, or } from 'drizzle-orm';
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import {
@@ -56,6 +56,32 @@ export class BookingsService {
     });
   }
 
+  /** The player's own bookings, newest slot first. Holds past their expiry show as expired. */
+  async listForUser(userId: string, now = new Date()) {
+    const rows = await this.db
+      .select({
+        id: bookings.id,
+        status: bookings.status,
+        startAt: bookings.startAt,
+        endAt: bookings.endAt,
+        currency: bookings.currency,
+        total: bookings.total,
+        advanceDue: bookings.advanceDue,
+        holdExpiresAt: bookings.holdExpiresAt,
+        paymentDeadlineAt: bookings.paymentDeadlineAt,
+        policy: bookings.policySnapshot,
+        court: { id: courts.id, name: courts.name },
+        venue: { id: branches.id, name: branches.name, city: branches.city, timezone: branches.timezone },
+      })
+      .from(bookings)
+      .innerJoin(courts, eq(courts.id, bookings.courtId))
+      .innerJoin(branches, eq(branches.id, courts.branchId))
+      .where(and(eq(bookings.createdBy, userId), eq(bookings.source, 'app')))
+      .orderBy(desc(bookings.startAt))
+      .limit(100);
+    return rows.map((b) => ({ ...b, status: effectiveStatus(b, now) }));
+  }
+
   /** Vendor books a walk-in or phone customer. Confirmed immediately. */
   async createManual(input: SlotInput & { staffUserId: string; customerName: string; now?: Date }) {
     const now = input.now ?? new Date();
@@ -98,8 +124,8 @@ export class BookingsService {
     opts: { skipPricing?: boolean } = {},
   ) {
     const { courtId, startAt, endAt } = input;
-    if (!(endAt > startAt)) throw new BookingError('INVALID_TIME', 'End must be after start');
-    if (startAt <= now) throw new BookingError('IN_PAST', 'Slot has already started');
+    if (!(endAt > startAt)) throw new BookingError('INVALID_TIME', 'The end time must be after the start time.');
+    if (startAt <= now) throw new BookingError('IN_PAST', 'This slot has already started. Choose a later time.');
 
     try {
       return await this.db.transaction(async (tx) => {
@@ -107,20 +133,20 @@ export class BookingsService {
         const step = await getSetting(tx, 'booking.slot_step_minutes', ctx.countryCode);
         const durationMin = (endAt.getTime() - startAt.getTime()) / 60_000;
         if (durationMin % step !== 0 || startAt.getTime() % (step * 60_000) !== 0) {
-          throw new BookingError('INVALID_TIME', `Bookings must align to ${step} minute steps`);
+          throw new BookingError('INVALID_TIME', `Bookings must start and end on ${step}-minute steps.`);
         }
 
         let total = 0;
         let advanceDue = 0;
         if (!opts.skipPricing) {
           if (!isWithinOpeningHours(startAt, endAt, ctx.timezone, ctx.hours)) {
-            throw new BookingError('OUTSIDE_OPENING_HOURS', 'Court is closed at this time');
+            throw new BookingError('OUTSIDE_OPENING_HOURS', 'The court is closed at this time.');
           }
           const weekendDays = await getSetting(tx, 'calendar.weekend_days', ctx.countryCode);
           try {
             total = calculatePrice(startAt, endAt, ctx.timezone, ctx.rules, ctx.holidays, weekendDays, step);
           } catch {
-            throw new BookingError('NO_PRICE', 'No price is set for part of this slot');
+            throw new BookingError('NO_PRICE', 'This time cannot be booked yet. Choose another slot.');
           }
           advanceDue = calculateAdvance(total, ctx.policy.advanceType, ctx.policy.advanceValue);
         }
@@ -143,7 +169,8 @@ export class BookingsService {
         return row!;
       });
     } catch (err) {
-      if (isExclusionViolation(err)) throw new BookingError('SLOT_TAKEN', 'This slot is no longer available');
+      if (isExclusionViolation(err))
+        throw new BookingError('SLOT_TAKEN', 'This slot has just been taken. Choose another time.');
       throw err;
     }
   }
@@ -179,11 +206,11 @@ export class BookingsService {
       .innerJoin(vendors, eq(vendors.id, branches.vendorId))
       .where(eq(courts.id, courtId));
     if (!court || !court.active || court.branchStatus !== 'live' || court.vendorStatus !== 'approved') {
-      throw new BookingError('COURT_UNAVAILABLE', 'Court is not available for booking');
+      throw new BookingError('COURT_UNAVAILABLE', 'This court cannot be booked right now.');
     }
 
     const [policy] = await tx.select().from(venuePolicies).where(eq(venuePolicies.branchId, court.branchId));
-    if (!policy) throw new BookingError('COURT_UNAVAILABLE', 'Venue policy is not set');
+    if (!policy) throw new BookingError('COURT_UNAVAILABLE', 'This court cannot be booked right now.');
 
     const [country] = await tx
       .select({ currency: countries.currency })
@@ -224,6 +251,16 @@ export class BookingsService {
       policy: policySnapshot,
     };
   }
+}
+
+/** Status as the player should see it: holds and unpaid bookings past their deadline are expired. */
+export function effectiveStatus(
+  b: { status: (typeof bookings.$inferSelect)['status']; holdExpiresAt: Date | null; paymentDeadlineAt: Date | null },
+  now: Date,
+) {
+  if (b.status === 'held' && b.holdExpiresAt && b.holdExpiresAt <= now) return 'expired' as const;
+  if (b.status === 'pending_payment' && b.paymentDeadlineAt && b.paymentDeadlineAt <= now) return 'expired' as const;
+  return b.status;
 }
 
 function isExclusionViolation(err: unknown): boolean {

@@ -120,3 +120,25 @@ export class NoPriceError extends Error {
     super(`No price rule covers ${at.date} at minute ${at.minutes}`);
   }
 }
+
+/** The instant at which the venue's wall clock shows `date` (YYYY-MM-DD) plus `minutes` (may exceed 24 h). */
+export function localToInstant(date: string, minutes: number, timeZone: string): Date {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  const guess = Date.UTC(y, m - 1, d) + minutes * 60_000;
+  const local = toLocal(new Date(guess), timeZone);
+  const [ly, lm, ld] = local.date.split('-').map(Number) as [number, number, number];
+  const offset = Date.UTC(ly, lm - 1, ld) + local.minutes * 60_000 - guess;
+  return new Date(guess - offset);
+}
+
+/** Slot start and end minutes (from local midnight of `weekday`) inside that day's opening windows. */
+export function slotTimes(weekday: number, hours: OpeningHours[], slotMinutes: number): [number, number][] {
+  const slots: [number, number][] = [];
+  for (const h of hours.filter((x) => x.weekday === weekday)) {
+    const open = toMinutes(h.opensAt);
+    let close = toMinutes(h.closesAt);
+    if (close <= open) close += 24 * 60;
+    for (let start = open; start + slotMinutes <= close; start += slotMinutes) slots.push([start, start + slotMinutes]);
+  }
+  return slots.sort((a, b) => a[0] - b[0]);
+}
