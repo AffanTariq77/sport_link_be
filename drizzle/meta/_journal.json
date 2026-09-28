@@ -36,6 +36,13 @@
       "when": 1790578942296,
       "tag": "0004_verification_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790587951169,
+      "tag": "0005_admin_auth",
+      "breakpoints": true
     }
   ]
 }

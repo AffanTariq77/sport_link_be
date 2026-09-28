@@ -1,5 +1,7 @@
 // Local development seed. Fake data only: never real phone numbers, CNICs or payment details.
 import { eq } from 'drizzle-orm';
+import { hashPassword } from '../admin/password.js';
+import { newTotpSecret } from '../admin/totp.js';
 import { loadEnv } from '../config.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
 import { createDb } from './client.js';
@@ -119,6 +121,22 @@ if (demo) {
       { ...approved, method: 'cash', accountTitle: 'Pay at the front desk' },
     ]);
   }
+}
+
+// Local admin for the admin panel, only when DEV_ADMIN_EMAIL and DEV_ADMIN_PASSWORD are set in .env.
+// Sign in with the DEV_TOTP_CODE as the two-factor code (development only, refused in production).
+const devAdmin = process.env.DEV_ADMIN_EMAIL?.toLowerCase();
+if (devAdmin && process.env.DEV_ADMIN_PASSWORD) {
+  await db
+    .insert(s.adminUsers)
+    .values({
+      email: devAdmin,
+      name: 'Local Admin',
+      role: 'owner',
+      passwordHash: await hashPassword(process.env.DEV_ADMIN_PASSWORD),
+      totpSecretEncrypted: new DocumentCrypto(loadEnv().DOCUMENT_KEY).encryptTotp(newTotpSecret()),
+    })
+    .onConflictDoNothing();
 }
 
 await pool.end();

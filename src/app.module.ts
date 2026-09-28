@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_PIPE } from '@nestjs/core';
+import { AdminAuthService, DEV_TOTP } from './admin/admin-auth.service.js';
+import { AdminAuthController, AdminController } from './admin/admin.controller.js';
+import { AdminGuard } from './admin/admin.guard.js';
+import { AdminService } from './admin/admin.service.js';
 import { validationPipe } from './api-error.js';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
@@ -32,6 +36,8 @@ import { HealthController } from './health/health.controller.js';
     BookingsController,
     PaymentsController,
     VendorsController,
+    AdminAuthController,
+    AdminController,
   ],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },
@@ -39,6 +45,10 @@ import { HealthController } from './health/health.controller.js';
     VenuesService,
     PaymentsService,
     VendorsService,
+    AdminAuthService,
+    AdminService,
+    AdminGuard,
+    { provide: DEV_TOTP, useFactory: () => loadEnv().DEV_TOTP_CODE },
     AuthService,
     AuthGuard,
     // SMS_PROVIDER only allows 'fake' until a provider is chosen; config refuses it in production.

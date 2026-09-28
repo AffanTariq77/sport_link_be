@@ -654,8 +654,27 @@ export const adminUsers = pgTable('admin_users', {
   passwordHash: text('password_hash').notNull(),
   totpSecretEncrypted: text('totp_secret_encrypted'),
   active: boolean('active').notNull().default(true),
+  failedLoginCount: smallint('failed_login_count').notNull().default(0),
+  lockedUntil: ts('locked_until'),
   ...timestamps,
 });
+
+// Admin sign-ins, separate from player sessions. Token stored as a SHA-256 hash; no refresh token.
+export const adminSessions = pgTable(
+  'admin_sessions',
+  {
+    id: id(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => adminUsers.id),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    revokedAt: ts('revoked_at'),
+    ip: text('ip'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('admin_sessions_token_uq').on(t.tokenHash)],
+);
 
 // Append-only. Update and delete are blocked by trigger in drizzle/0001_constraints.sql.
 export const auditLog = pgTable(

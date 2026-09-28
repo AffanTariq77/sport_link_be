@@ -2,6 +2,23 @@ import { and, eq, isNull, or } from 'drizzle-orm';
 import type { Db } from './db/client.js';
 import { settings } from './db/schema.js';
 
+export const ADMIN_PERMISSIONS = [
+  'admins.manage',
+  'venues.approve',
+  'venues.ban',
+  'payment_accounts.approve',
+  'billing.manage',
+  'billing.view',
+  'verification.review',
+  'users.ban',
+  'reports.review',
+  'disputes.resolve',
+  'audit.view',
+  'settings.manage',
+  'analytics.view',
+] as const;
+export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
+
 // Defaults for every admin-configurable rule. The settings table overrides these,
 // per country first, then global. Keys match docs/SPEC.md.
 export const DEFAULTS = {
@@ -20,6 +37,32 @@ export const DEFAULTS = {
   // OPEN (spec 5): CNIC at sign-up, or only before creating, joining or using Find Players.
   'verification.required_at': 'signup' as 'signup' | 'before_participation',
   'verification.max_image_bytes': 5_000_000,
+  'admin.session_hours': 8,
+  'admin.max_failed_logins': 5,
+  'admin.lockout_minutes': 15,
+  // Granular admin permissions per role (spec 14). Change here or in the settings table, not in code paths.
+  'admin.role_permissions': {
+    owner: [...ADMIN_PERMISSIONS],
+    super_admin: [...ADMIN_PERMISSIONS], // except managing owners, enforced where admins are managed
+    operations: [
+      'venues.approve',
+      'venues.ban',
+      'payment_accounts.approve',
+      'billing.view',
+      'verification.review',
+      'disputes.resolve',
+      'analytics.view',
+    ],
+    finance: ['payment_accounts.approve', 'billing.manage', 'billing.view', 'disputes.resolve', 'analytics.view'],
+    moderation: [
+      'verification.review',
+      'users.ban',
+      'venues.ban',
+      'reports.review',
+      'disputes.resolve',
+      'analytics.view',
+    ],
+  } as Record<string, readonly string[]>,
 } as const;
 
 export type SettingKey = keyof typeof DEFAULTS;

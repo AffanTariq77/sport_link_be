@@ -19,6 +19,11 @@ const Env = z
     // Where uploaded documents are stored. 'local' is a folder for development; S3 is added once hosting is chosen.
     STORAGE_DRIVER: z.enum(['local']).default('local'),
     STORAGE_DIR: z.string().default('.storage'),
+    // Development only: a fixed admin two-factor code, like DEV_OTP_CODE. Refused in production.
+    DEV_TOTP_CODE: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.STORAGE_DRIVER === 'local'), {
     message: 'STORAGE_DRIVER=local is not allowed in production',
@@ -27,6 +32,10 @@ const Env = z
   .refine((e) => !(e.NODE_ENV === 'production' && e.SMS_PROVIDER === 'fake'), {
     message: 'SMS_PROVIDER=fake is not allowed in production',
     path: ['SMS_PROVIDER'],
+  })
+  .refine((e) => !(e.NODE_ENV === 'production' && e.DEV_TOTP_CODE), {
+    message: 'DEV_TOTP_CODE is not allowed in production',
+    path: ['DEV_TOTP_CODE'],
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.DEV_OTP_CODE), {
     message: 'DEV_OTP_CODE is not allowed in production',

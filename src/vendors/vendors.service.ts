@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { calculatePrice, localToInstant, slotTimes } from '../bookings/pricing.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -364,6 +364,12 @@ export class VendorsService {
       .where(eq(branches.id, branchId))
       .then((rows) => rows.map((r) => ({ ...r.branch, latitude: Number(r.latitude), longitude: Number(r.longitude) })));
     const [policy] = await this.db.select().from(venuePolicies).where(eq(venuePolicies.branchId, branchId));
+    const [visit] = await this.db
+      .select({ scheduledAt: siteVisits.scheduledAt, result: siteVisits.result, notes: siteVisits.notes })
+      .from(siteVisits)
+      .where(eq(siteVisits.branchId, branchId))
+      .orderBy(desc(siteVisits.createdAt))
+      .limit(1);
     const courtRows = await this.db
       .select()
       .from(courts)
@@ -393,6 +399,7 @@ export class VendorsService {
       rules: b!.rules,
       timezone: b!.timezone,
       status: b!.status,
+      visit: visit ?? null,
       policy: {
         advanceType: policy!.advanceType,
         advanceValue: policy!.advanceValue,

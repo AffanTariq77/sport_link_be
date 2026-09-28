@@ -132,6 +132,9 @@ const Setup = z
         rules: z.string().nullable(),
         timezone: z.string(),
         status: z.enum(listingStatus.enumValues),
+        visit: z
+          .object({ scheduledAt: z.iso.datetime().nullable(), result: z.string(), notes: z.string().nullable() })
+          .nullable(),
         policy: PolicyShape,
         courts: z.array(
           z.object({

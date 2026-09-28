@@ -12,7 +12,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
-    "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
+    "admin:create": "tsx --env-file-if-exists=.env src/db/create-admin.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {
