@@ -549,13 +549,17 @@ export const matchPlayers = pgTable(
 );
 
 // ---------- Chat ----------
-export const conversations = pgTable('conversations', {
-  id: id(),
-  type: conversationType('type').notNull(),
-  refId: uuid('ref_id'), // match, team, request or booking id
-  archivedAt: ts('archived_at'),
-  ...timestamps,
-});
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: id(),
+    type: conversationType('type').notNull(),
+    refId: uuid('ref_id'), // match, team, request or booking id
+    archivedAt: ts('archived_at'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('conversations_ref_uq').on(t.type, t.refId)],
+);
 
 export const conversationMembers = pgTable(
   'conversation_members',

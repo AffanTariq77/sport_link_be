@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "conversations_ref_uq" ON "conversations" USING btree ("type","ref_id");

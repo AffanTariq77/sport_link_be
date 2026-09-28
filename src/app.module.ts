@@ -10,6 +10,8 @@ import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
 import { DEV_OTP, FakeSmsSender, SMS } from './auth/sms.js';
 import { BookingsController } from './bookings/bookings.controller.js';
+import { ChatController } from './chat/chat.controller.js';
+import { ChatService } from './chat/chat.service.js';
 import { BookingsService } from './bookings/bookings.service.js';
 import { loadEnv } from './config.js';
 import { MatchesController } from './matches/matches.controller.js';
@@ -43,6 +45,7 @@ import { HealthController } from './health/health.controller.js';
     VendorsController,
     CalendarController,
     MatchesController,
+    ChatController,
     AdminAuthController,
     AdminController,
   ],
@@ -54,6 +57,7 @@ import { HealthController } from './health/health.controller.js';
     VendorsService,
     CalendarService,
     MatchesService,
+    ChatService,
     StaffService,
     AdminAuthService,
     AdminService,
