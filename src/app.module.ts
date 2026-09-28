@@ -7,12 +7,17 @@ import { AuthService } from './auth/auth.service.js';
 import { DEV_OTP, FakeSmsSender, SMS } from './auth/sms.js';
 import { BookingsService } from './bookings/bookings.service.js';
 import { loadEnv } from './config.js';
+import { MeController } from './users/me.controller.js';
+import { ProfileService } from './users/profile.service.js';
+import { DocumentCrypto } from './verification/document-crypto.js';
+import { LocalDiskStorage, STORAGE } from './verification/storage.js';
+import { VerificationService } from './verification/verification.service.js';
 import { DbModule } from './db/db.module.js';
 import { HealthController } from './health/health.controller.js';
 
 @Module({
   imports: [DbModule],
-  controllers: [HealthController, AuthController],
+  controllers: [HealthController, AuthController, MeController],
   providers: [
     { provide: APP_PIPE, useValue: validationPipe },
     BookingsService,
@@ -21,6 +26,11 @@ import { HealthController } from './health/health.controller.js';
     // SMS_PROVIDER only allows 'fake' until a provider is chosen; config refuses it in production.
     { provide: SMS, useClass: FakeSmsSender },
     { provide: DEV_OTP, useFactory: () => loadEnv().DEV_OTP_CODE },
+    ProfileService,
+    VerificationService,
+    { provide: DocumentCrypto, useFactory: () => new DocumentCrypto(loadEnv().DOCUMENT_KEY) },
+    // STORAGE_DRIVER only allows 'local' until S3 is added; config refuses it in production.
+    { provide: STORAGE, useFactory: () => new LocalDiskStorage(loadEnv().STORAGE_DIR) },
   ],
 })
 export class AppModule {}

@@ -3,6 +3,7 @@
 // times are timestamptz (UTC), all business rules that may change live in `settings`.
 // The booking no-overlap constraint and PostGIS indexes are in the custom SQL migration
 // (drizzle/0001_constraints.sql) because Drizzle cannot express them.
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -181,7 +182,14 @@ export const verifications = pgTable(
     reviewedAt: ts('reviewed_at'),
     ...timestamps,
   },
-  (t) => [index('verifications_hash_idx').on(t.docNumberHash)],
+  (t) => [
+    index('verifications_hash_idx').on(t.docNumberHash),
+    // One document per active verification: a CNIC already pending or approved cannot be used again,
+    // including by a second account (spec 5). Rejected ones do not count.
+    uniqueIndex('verifications_active_doc_uq')
+      .on(t.docNumberHash)
+      .where(sql`${t.status} <> 'rejected'`),
+  ],
 );
 
 export const devices = pgTable('devices', {

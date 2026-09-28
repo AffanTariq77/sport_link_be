@@ -1,7 +1,7 @@
-import { Body, Controller, Get, HttpCode, HttpException, Inject, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiDefaultResponse, ApiNoContentResponse, ApiOkResponse } from '@nestjs/swagger';
 import { z } from 'zod';
-import { ApiError } from '../api-error.js';
+import { ApiError, withErrors } from '../api-error.js';
 import { userStatus } from '../db/schema.js';
 import { AuthGuard, type AuthedRequest } from './auth.guard.js';
 import { AuthError, AuthService } from './auth.service.js';
@@ -23,7 +23,7 @@ const VerifyBody = z
   .meta({ id: 'OtpVerify' });
 const RefreshBody = z.object({ refreshToken: z.string().max(128) }).meta({ id: 'RefreshRequest' });
 
-const User = z
+export const User = z
   .object({
     id: z.uuid(),
     name: z.string().nullable(),
@@ -43,14 +43,7 @@ const Tokens = z
 const SignedIn = Tokens.extend({ isNewUser: z.boolean(), user: User }).meta({ id: 'SignedIn' });
 const OtpSent = z.object({ resendInSeconds: z.int() }).meta({ id: 'OtpSent' });
 
-async function run<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    if (e instanceof AuthError) throw new HttpException({ code: e.code, message: e.message }, STATUS[e.code]);
-    throw e;
-  }
-}
+const run = <T>(fn: () => Promise<T>) => withErrors(AuthError, STATUS, fn);
 
 @Controller('auth')
 @ApiDefaultResponse({ description: 'Error', standardSchema: ApiError })

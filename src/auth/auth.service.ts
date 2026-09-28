@@ -32,7 +32,7 @@ const newToken = () => randomBytes(32).toString('base64url');
 const sameHash = (a: string, b: string) => timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 
 // Returned to clients. Never includes the phone number (CLAUDE.md non-negotiable rule).
-const userColumns = {
+export const userColumns = {
   id: users.id,
   name: users.name,
   status: users.status,

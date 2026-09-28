@@ -13,6 +13,16 @@ const Env = z
       .string()
       .regex(/^\d{6}$/, 'DEV_OTP_CODE must be 6 digits')
       .optional(),
+    // Master key for CNIC and B-Form data (base64, 32 bytes). Separate keys for numbers, images and the
+    // duplicate-check hash are derived from it. Generate with: openssl rand -base64 32
+    DOCUMENT_KEY: z.base64().refine((k) => Buffer.from(k, 'base64').length === 32, 'DOCUMENT_KEY must be 32 bytes'),
+    // Where uploaded documents are stored. 'local' is a folder for development; S3 is added once hosting is chosen.
+    STORAGE_DRIVER: z.enum(['local']).default('local'),
+    STORAGE_DIR: z.string().default('.storage'),
+  })
+  .refine((e) => !(e.NODE_ENV === 'production' && e.STORAGE_DRIVER === 'local'), {
+    message: 'STORAGE_DRIVER=local is not allowed in production',
+    path: ['STORAGE_DRIVER'],
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.SMS_PROVIDER === 'fake'), {
     message: 'SMS_PROVIDER=fake is not allowed in production',

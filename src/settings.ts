@@ -17,6 +17,9 @@ export const DEFAULTS = {
   'auth.otp_requests_per_hour': 5,
   'auth.access_token_minutes': 15,
   'auth.refresh_token_days': 30,
+  // OPEN (spec 5): CNIC at sign-up, or only before creating, joining or using Find Players.
+  'verification.required_at': 'signup' as 'signup' | 'before_participation',
+  'verification.max_image_bytes': 5_000_000,
 } as const;
 
 export type SettingKey = keyof typeof DEFAULTS;

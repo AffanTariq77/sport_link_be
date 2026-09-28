@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "verifications_active_doc_uq" ON "verifications" USING btree ("doc_number_hash") WHERE "verifications"."status" <> 'rejected';

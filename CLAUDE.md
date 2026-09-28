@@ -19,7 +19,8 @@ Full spec: `docs/SPEC.md`. Business rules: `docs/FOUNDATION.md`. Read the releva
 - `drizzle/0002_constraints.sql`: booking no-overlap exclusion constraint, money checks, unique transaction references, PostGIS indexes, append-only audit log
 - Booking engine (`src/bookings`): holds, manual bookings, maintenance blocks, pricing across peak boundaries and past-midnight hours, holidays, advance calculation, expiry of stale holds
 - Settings with country override (`src/settings.ts`), health endpoint, seed
-- Auth (`src/auth`): phone OTP with a fake SMS provider (codes print to the API log), opaque hashed access and rotating refresh tokens with reuse detection, `AuthGuard`, `/auth/me`. OTP limits are settings. CNIC upload and guardian consent not built yet
+- Auth (`src/auth`): phone OTP with a fake SMS provider (codes print to the API log), opaque hashed access and rotating refresh tokens with reuse detection, `AuthGuard`, `/auth/me`. OTP limits are settings. `DEV_OTP_CODE` fixes the code in development
+- Profile and ID (`src/users`, `src/verification`): `PATCH /me/profile` (date of birth sets `is_minor`, locked once a document is submitted), `GET`/`POST /me/verification` (CNIC for adults, B-Form for minors). Numbers and images encrypted with AES-256-GCM using keys derived from `DOCUMENT_KEY`, HMAC hash for duplicates. `verifications_active_doc_uq` blocks a document already pending or approved on any account; duplicates are flagged in `reports`. Storage behind `FileStorage` (local folder in development, S3 not added yet). Timing is the setting `verification.required_at`. Not built yet: guardian consent, admin review (approve, reject, audit-logged viewing)
 
 ## Decisions already made
 
@@ -60,7 +61,7 @@ Anything marked OPEN in the spec: build as a setting or feature flag, never hard
 
 ## Next steps (Phase 1)
 
-1. Auth: phone OTP (provider behind an interface, fake provider in dev), sessions, CNIC upload, guardian consent flow
+1. Auth: guardian consent flow for minors, admin review of verifications (phone OTP, sessions, profile and ID upload are done)
 2. Booking API: endpoints over `BookingsService`, split shares, payment submission and vendor confirmation, cancellation and refunds, recurring series
 3. Vendors: onboarding, branches, courts, price rules, policies, payment account approval, site visits
 4. Matches: create, filters, join requests, approval, shares
