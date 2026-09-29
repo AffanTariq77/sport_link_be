@@ -120,6 +120,13 @@
       "when": 1790668330044,
       "tag": "0016_tournaments",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790669347144,
+      "tag": "0017_venue_reviews",
+      "breakpoints": true
     }
   ]
 }

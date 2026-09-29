@@ -857,6 +857,34 @@ export const tournamentFixtures = pgTable(
   (t) => [uniqueIndex('tournament_fixtures_slot_uq').on(t.tournamentId, t.stage, t.round, t.groupNo, t.slot)],
 );
 
+// Players review the venue after a played booking; the venue can reply (spec 13.2 analytics, "reviews with reply").
+export const venueReviews = pgTable(
+  'venue_reviews',
+  {
+    id: id(),
+    bookingId: uuid('booking_id')
+      .notNull()
+      .references(() => bookings.id),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => branches.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    stars: smallint('stars').notNull(),
+    comment: text('comment'),
+    reply: text('reply'),
+    repliedBy: uuid('replied_by').references(() => users.id),
+    repliedAt: ts('replied_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('venue_reviews_booking_uq').on(t.bookingId),
+    index('venue_reviews_branch_idx').on(t.branchId, t.createdAt),
+    check('venue_reviews_stars_ck', sql`${t.stars} between 1 and 5`),
+  ],
+);
+
 // ---------- Results, ratings and reviews (spec 11) ----------
 export const resultStatus = pgEnum('result_status', ['pending', 'confirmed', 'disputed', 'voided']);
 export const resultOutcome = pgEnum('result_outcome', ['a', 'b', 'draw']);

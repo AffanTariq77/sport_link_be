@@ -42,6 +42,8 @@ import { FindController } from './find/find.controller.js';
 import { FindService } from './find/find.service.js';
 import { AdminTournamentsController, TournamentsController } from './tournaments/tournaments.controller.js';
 import { TournamentsService } from './tournaments/tournaments.service.js';
+import { AnalyticsController } from './analytics/analytics.controller.js';
+import { AnalyticsService } from './analytics/analytics.service.js';
 import { VendorsController, VenuePhotosController } from './vendors/vendors.controller.js';
 import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
@@ -72,6 +74,7 @@ import { HealthController } from './health/health.controller.js';
     FindController,
     TournamentsController,
     AdminTournamentsController,
+    AnalyticsController,
     CalendarController,
     MatchesController,
     ChatController,
@@ -94,6 +97,7 @@ import { HealthController } from './health/health.controller.js';
     TeamsService,
     FindService,
     TournamentsService,
+    AnalyticsService,
     CalendarService,
     MatchesService,
     ChatService,

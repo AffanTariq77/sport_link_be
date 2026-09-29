@@ -101,6 +101,7 @@ export const DEFAULTS = {
   'rating.provisional_deviation': 110,
   // Behaviour reviews (spec 11.6).
   'review.window_hours': 48,
+  'review.venue_window_days': 14, // players review a venue this long after playing
   'review.tags': ['on_time', 'friendly', 'fair_play', 'skilled', 'good_communication', 'team_player'] as string[],
   'admin.session_hours': 8,
   'admin.max_failed_logins': 5,
