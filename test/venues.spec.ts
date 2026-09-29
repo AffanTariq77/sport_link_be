@@ -52,6 +52,7 @@ describe('venues', () => {
       cancelRefund: true,
       cancelWindowHours: 24,
       noShowRefund: false,
+      recurringAllowed: false,
     });
     expect(venue.paymentMethods).toEqual([]);
     expect(JSON.stringify(venue)).not.toMatch(/account/i);
