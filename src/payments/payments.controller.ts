@@ -92,6 +92,10 @@ const QueueItem = z
       holdExpiresAt: z.iso.datetime().nullable(),
       paymentDeadlineAt: z.iso.datetime().nullable(),
     }),
+    series: z
+      .object({ weeks: z.int(), advanceTotal: z.int() })
+      .nullable()
+      .meta({ description: 'Weekly booking: this payment covers every week' }),
   })
   .meta({ id: 'PaymentToCheck' });
 const RejectBody = z
@@ -125,6 +129,23 @@ export class PaymentsController {
     @Body({ schema: PaymentBody }) body: z.infer<typeof PaymentBody>,
   ) {
     return run(() => this.payments.submit(id, req.auth.user.id, body));
+  }
+
+  /** Pays every week of a weekly booking with one transfer (spec 6.2: all weeks paid upfront). */
+  @UseGuards(UnlockedGuard)
+  @Post('bookings/series/:id/payment')
+  @HttpCode(200)
+  @ApiOkResponse({
+    standardSchema: z
+      .object({ weeks: z.int(), advanceTotal: z.int(), status: z.enum(['confirmed', 'pending_payment']) })
+      .meta({ id: 'SeriesPaymentResult' }),
+  })
+  submitSeries(
+    @Req() req: AuthedRequest,
+    @Param('id', { schema: Id }) id: string,
+    @Body({ schema: PaymentBody }) body: z.infer<typeof PaymentBody>,
+  ) {
+    return run(() => this.payments.submitSeries(id, req.auth.user.id, body));
   }
 
   /** Vendors and branches the user can act for. Empty for players; the apps show Vendor mode when not. */

@@ -32,6 +32,8 @@ const BOOKING_STATUS: Record<BookingError['code'], number> = {
   OUTSIDE_OPENING_HOURS: 400,
   NO_PRICE: 400,
   COURT_UNAVAILABLE: 404,
+  RECURRING_NOT_ALLOWED: 409,
+  NOT_FOUND: 404,
 };
 const run = <T>(fn: () => Promise<T>) =>
   withErrors(VendorError, VENDOR_STATUS, () => withErrors(BookingError, BOOKING_STATUS, fn));

@@ -1,0 +1,1 @@
+ALTER TABLE "bookings" ADD COLUMN "extends_booking_id" uuid;

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -202,6 +202,106 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Weekly bookings are paid upfront (spec 6.2): one transfer covers every week. The first week's share carries
+   * the transaction ID; the other weeks' shares follow it when the venue confirms or rejects.
+   */
+  async submitSeries(
+    seriesId: string,
+    userId: string,
+    input: { method: Method; txnReference?: string },
+    now = new Date(),
+  ) {
+    const rows = await this.db
+      .select({ id: bookings.id })
+      .from(bookings)
+      .where(and(eq(bookings.recurringSeriesId, seriesId), eq(bookings.createdBy, userId)))
+      .orderBy(asc(bookings.startAt));
+    const all = await Promise.all(rows.map((r) => this.ownBooking(r.id, userId)));
+    const open = all.filter((b) => effectiveStatus(b, now) === 'held' || effectiveStatus(b, now) === 'pending_payment');
+    if (!open.length) throw new PaymentError('NOT_PAYABLE', 'These weeks can no longer be paid. Please book again.');
+    const first = open[0]!;
+    const payAtVenue = input.method === 'cash';
+    if (payAtVenue && !open.every((b) => this.cashAllowed(b)))
+      throw new PaymentError('CASH_NOT_ALLOWED', 'This venue needs the advance paid before your slots are confirmed.');
+    const reference = input.txnReference?.trim() ?? '';
+    if (!payAtVenue && !REFERENCE.test(reference))
+      throw new PaymentError('INVALID_REFERENCE', 'Enter the transaction ID from your payment receipt.');
+    if (!payAtVenue) {
+      const [account] = await this.db
+        .select({ id: paymentAccounts.id })
+        .from(paymentAccounts)
+        .where(
+          and(
+            eq(paymentAccounts.vendorId, first.vendorId),
+            eq(paymentAccounts.method, input.method),
+            eq(paymentAccounts.status, 'approved'),
+          ),
+        );
+      if (!account) throw new PaymentError('METHOD_NOT_ACCEPTED', 'This venue does not accept that payment method.');
+    }
+    const total = open.reduce((sum, b) => sum + b.advanceDue, 0);
+    try {
+      await this.db.transaction(async (tx) => {
+        const minutes = await getSetting(tx, 'booking.payment_confirm_minutes', first.countryCode);
+        for (const [i, b] of open.entries()) {
+          const [waiting] = await tx
+            .select({ id: bookingShares.id })
+            .from(bookingShares)
+            .where(and(eq(bookingShares.bookingId, b.id), eq(bookingShares.status, 'submitted')));
+          if (waiting) throw new PaymentError('ALREADY_SUBMITTED', 'The venue is checking your payment.');
+          await tx.insert(bookingShares).values({
+            bookingId: b.id,
+            userId,
+            amount: b.total,
+            advanceAmount: b.advanceDue,
+            method: input.method,
+            txnReference: payAtVenue || i > 0 ? null : reference,
+            status: payAtVenue ? 'pending' : 'submitted',
+          });
+          await tx
+            .update(bookings)
+            .set(
+              payAtVenue
+                ? { status: 'confirmed', updatedAt: now }
+                : {
+                    status: 'pending_payment',
+                    paymentDeadlineAt: new Date(now.getTime() + minutes * 60_000),
+                    updatedAt: now,
+                  },
+            )
+            .where(eq(bookings.id, b.id));
+        }
+      });
+    } catch (err) {
+      if (!hasPgCode(err, UNIQUE_VIOLATION)) throw err;
+      await this.db.insert(reports).values({
+        reporterId: userId,
+        targetType: 'booking',
+        targetId: first.id,
+        reason: 'duplicate_transaction_reference',
+        details: 'Automatic flag: payment reference already used for another booking.',
+        evidence: { method: input.method, seriesId },
+      });
+      throw new PaymentError(
+        'DUPLICATE_TRANSACTION',
+        'That transaction ID has already been used. Check the ID on your receipt.',
+      );
+    }
+    if (this.notes && !payAtVenue)
+      await this.notes.notify(await this.notes.vendorRecipients(first.vendorId, 'confirm_payments', first.branchId), {
+        kind: 'payment',
+        title: 'Weekly booking payment to check',
+        body: `${money(total, first.currency)} for ${open.length} weeks by ${input.method.replace('_', ' ')}, reference ${reference}.`,
+        link: '/vendor/payments',
+      });
+    return {
+      weeks: open.length,
+      advanceTotal: total,
+      status: payAtVenue ? ('confirmed' as const) : ('pending_payment' as const),
+    };
+  }
+
   /** Branches this user can confirm payments for: owned vendors, or staff with the permission. */
   vendorAccess(userId: string) {
     return vendorAccess(this.db, userId, 'confirm_payments');
@@ -231,20 +331,45 @@ export class PaymentsService {
         },
         court: courts.name,
         branch: { name: branches.name, timezone: branches.timezone },
+        seriesId: bookings.recurringSeriesId,
       })
       .from(bookingShares)
       .innerJoin(bookings, eq(bookings.id, bookingShares.bookingId))
       .innerJoin(courts, eq(courts.id, bookings.courtId))
       .innerJoin(branches, eq(branches.id, courts.branchId))
       .innerJoin(users, eq(users.id, bookingShares.userId))
-      .where(and(eq(bookingShares.status, 'submitted'), inArray(branches.id, branchIds)))
+      .where(
+        and(
+          eq(bookingShares.status, 'submitted'),
+          inArray(branches.id, branchIds),
+          // Weekly bookings: only the week carrying the transaction ID is shown; it stands for the series.
+          or(isNull(bookings.recurringSeriesId), isNotNull(bookingShares.txnReference)),
+        ),
+      )
       .orderBy(asc(bookings.paymentDeadlineAt))
       .limit(200);
+    const seriesIds = [...new Set(rows.map((r) => r.seriesId).filter((x): x is string => !!x))];
+    const weeks = seriesIds.length
+      ? await this.db
+          .select({
+            seriesId: bookings.recurringSeriesId,
+            count: sql<number>`count(*)::int`,
+            advance: sql<number>`sum(${bookingShares.advanceAmount})::bigint`,
+          })
+          .from(bookingShares)
+          .innerJoin(bookings, eq(bookings.id, bookingShares.bookingId))
+          .where(and(inArray(bookings.recurringSeriesId, seriesIds), eq(bookingShares.status, 'submitted')))
+          .groupBy(bookings.recurringSeriesId)
+      : [];
     // Never the player's phone number (CLAUDE.md), only their name.
-    return rows.map(({ booking, ...r }) => ({
-      ...r,
-      booking: { ...booking, status: effectiveStatus(booking, now) },
-    }));
+    return rows.map(({ booking, seriesId, ...r }) => {
+      const w = weeks.find((x) => x.seriesId === seriesId);
+      return {
+        ...r,
+        booking: { ...booking, status: effectiveStatus(booking, now) },
+        series: w ? { weeks: Number(w.count), advanceTotal: Number(w.advance) } : null,
+      };
+    });
   }
 
   /** Vendor confirms the money arrived. The booking is confirmed once confirmed payments cover the advance. */
@@ -260,6 +385,16 @@ export class PaymentsService {
         .where(and(eq(bookingShares.bookingId, booking.id), eq(bookingShares.status, 'confirmed')));
       if (Number(paid!.sum) >= booking.advanceDue) {
         await tx.update(bookings).set({ status: 'confirmed', updatedAt: now }).where(eq(bookings.id, booking.id));
+      }
+      for (const follower of await this.followers(tx, share, booking)) {
+        await tx
+          .update(bookingShares)
+          .set({ status: 'confirmed', confirmedBy: userId, confirmedAt: now, updatedAt: now })
+          .where(eq(bookingShares.id, follower.shareId));
+        await tx
+          .update(bookings)
+          .set({ status: 'confirmed', updatedAt: now })
+          .where(eq(bookings.id, follower.bookingId));
       }
       // A match player's paid share confirms their place (spec 8.1: confirmed = share paid).
       const [joiner] = await tx
@@ -295,6 +430,11 @@ export class PaymentsService {
         .update(bookingShares)
         .set({ status: 'rejected', confirmedBy: userId, confirmedAt: now, updatedAt: now })
         .where(eq(bookingShares.id, share.id));
+      for (const follower of await this.followers(tx, share, booking))
+        await tx
+          .update(bookingShares)
+          .set({ status: 'rejected', confirmedBy: userId, confirmedAt: now, updatedAt: now })
+          .where(eq(bookingShares.id, follower.shareId));
       // ponytail: disputes are reports until the admin disputes area (spec 14) has its own table.
       await tx.insert(reports).values({
         reporterId: userId,
@@ -344,6 +484,24 @@ export class PaymentsService {
       await apply(tx, row.share, row.booking);
       return { id: shareId, playerId: row.share.userId, bookingId: row.booking.id, matchId: joiner?.matchId ?? null };
     });
+  }
+
+  /** The other weeks of a weekly booking whose payment rides on this (lead) share. */
+  private async followers(tx: Tx, share: typeof bookingShares.$inferSelect, booking: typeof bookings.$inferSelect) {
+    if (!booking.recurringSeriesId || !share.txnReference) return [];
+    return tx
+      .select({ shareId: bookingShares.id, bookingId: bookings.id })
+      .from(bookingShares)
+      .innerJoin(bookings, eq(bookings.id, bookingShares.bookingId))
+      .where(
+        and(
+          eq(bookings.recurringSeriesId, booking.recurringSeriesId),
+          eq(bookingShares.userId, share.userId),
+          eq(bookingShares.status, 'submitted'),
+          isNull(bookingShares.txnReference),
+          ne(bookingShares.id, share.id),
+        ),
+      );
   }
 
   private cashAllowed(booking: { advanceDue: number; policySnapshot: unknown }) {

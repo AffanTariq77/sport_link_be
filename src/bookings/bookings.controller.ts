@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
@@ -14,6 +14,8 @@ const STATUS: Record<BookingError['code'], number> = {
   OUTSIDE_OPENING_HOURS: 400,
   NO_PRICE: 400,
   COURT_UNAVAILABLE: 404,
+  RECURRING_NOT_ALLOWED: 409,
+  NOT_FOUND: 404,
 };
 
 const HoldBody = z
@@ -43,7 +45,20 @@ const MyBooking = BookingBase.extend({
   paymentDeadlineAt: z.iso.datetime().nullable(),
   court: z.object({ id: z.uuid(), name: z.string() }),
   venue: z.object({ id: z.uuid(), name: z.string(), city: z.string(), timezone: z.string() }),
+  seriesId: z.uuid().nullable().meta({ description: 'Weekly booking series' }),
+  extendsBookingId: z.uuid().nullable(),
 }).meta({ id: 'MyBooking' });
+const SeriesBody = HoldBody.extend({
+  weeks: z.int().min(2).max(52),
+  skip: z
+    .array(z.iso.datetime({ offset: true }))
+    .max(52)
+    .optional()
+    .meta({ description: 'Start times of weeks to leave out' }),
+}).meta({ id: 'RecurringRequest' });
+const SeriesWeeks = z
+  .array(z.object({ startAt: z.iso.datetime(), endAt: z.iso.datetime(), free: z.boolean() }))
+  .meta({ id: 'RecurringWeeks' });
 
 @Controller('bookings')
 @UseGuards(AuthGuard)
@@ -65,6 +80,69 @@ export class BookingsController {
         endAt: new Date(body.endAt),
         userId: req.auth.user.id,
       });
+      return {
+        id: b.id,
+        status: effectiveStatus(b, new Date()),
+        startAt: b.startAt,
+        endAt: b.endAt,
+        currency: b.currency,
+        total: b.total,
+        advanceDue: b.advanceDue,
+        holdExpiresAt: b.holdExpiresAt,
+        policy: b.policySnapshot,
+      };
+    });
+  }
+
+  /** Weekly booking: every week checked together, so taken weeks can be skipped (spec 6.2). */
+  @Post('recurring/check')
+  @HttpCode(200)
+  @ApiOkResponse({ standardSchema: SeriesWeeks })
+  checkSeries(@Body({ schema: SeriesBody }) body: z.infer<typeof SeriesBody>) {
+    return withErrors(BookingError, STATUS, () =>
+      this.bookings.checkSeries({
+        courtId: body.courtId,
+        startAt: new Date(body.startAt),
+        endAt: new Date(body.endAt),
+        weeks: body.weeks,
+      }),
+    );
+  }
+
+  @UseGuards(UnlockedGuard)
+  @Post('recurring')
+  @HttpCode(200)
+  @ApiOkResponse({ standardSchema: z.object({ seriesId: z.uuid(), weeks: z.int(), advanceTotal: z.int() }) })
+  createSeries(@Req() req: AuthedRequest, @Body({ schema: SeriesBody }) body: z.infer<typeof SeriesBody>) {
+    return withErrors(BookingError, STATUS, async () => {
+      const r = await this.bookings.createSeries({
+        courtId: body.courtId,
+        startAt: new Date(body.startAt),
+        endAt: new Date(body.endAt),
+        weeks: body.weeks,
+        skip: body.skip?.map((x) => new Date(x).toISOString()),
+        userId: req.auth.user.id,
+      });
+      return {
+        seriesId: r.seriesId,
+        weeks: r.bookings.length,
+        advanceTotal: r.bookings.reduce((s, b) => s + b.advanceDue, 0),
+      };
+    });
+  }
+
+  @UseGuards(UnlockedGuard)
+  @Post(':id/extend')
+  @HttpCode(200)
+  @ApiOkResponse({ standardSchema: Hold })
+  extend(
+    @Req() req: AuthedRequest,
+    @Param('id', { schema: z.uuid('Not found.') }) id: string,
+    @Body({ schema: z.object({ minutes: z.int().min(15).max(240).optional() }).meta({ id: 'ExtendBooking' }) })
+    body: { minutes?: number },
+  ) {
+    return withErrors(BookingError, STATUS, async () => {
+      const b = await this.bookings.extend(req.auth.user.id, id, body.minutes);
       return {
         id: b.id,
         status: effectiveStatus(b, new Date()),

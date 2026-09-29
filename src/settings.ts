@@ -58,6 +58,7 @@ export const DEFAULTS = {
   'minors.block_private_chat': true,
   'minors.consent_version': '2026-09-v1' as string,
   // Spec 8.1: join requests close this long before the start.
+  'booking.max_recurring_weeks': 12, // spec 6.2: only where the venue allows recurring bookings
   'match.join_cutoff_minutes': 120,
   // Find Players (spec 9.3).
   'find.max_radius_km': 25,

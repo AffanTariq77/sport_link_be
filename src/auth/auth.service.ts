@@ -95,7 +95,25 @@ export class AuthService {
   /** Checks the code, creates the account on first sign-in, and starts a session. */
   async verifyOtp(input: { phone: string; code: string; now?: Date }) {
     const now = input.now ?? new Date();
-    const { phone, countryCode } = this.parsePhone(input.phone);
+    const { phone, countryCode } = await this.consumeCode(input.phone, input.code, now);
+
+    const inserted = await this.db
+      .insert(users)
+      .values({ phone, countryCode })
+      .onConflictDoNothing()
+      .returning(userColumns);
+    const user = inserted[0] ?? (await this.db.select(userColumns).from(users).where(eq(users.phone, phone)))[0]!;
+    if (BLOCKED.has(user.status)) throw new AuthError('ACCOUNT_BLOCKED', 'This account cannot sign in.');
+
+    return { ...(await this.startSession(user.id, user.countryCode, now)), isNewUser: inserted.length > 0, user };
+  }
+
+  /**
+   * Checks and uses up an OTP for a phone number, with the attempt limit and lockout. Also used to prove both
+   * numbers when a player changes their number (spec 5).
+   */
+  async consumeCode(rawPhone: string, code: string, now = new Date()) {
+    const { phone, countryCode } = this.parsePhone(rawPhone);
     await this.assertNotLocked(phone, now);
 
     const [challenge] = await this.db
@@ -122,7 +140,7 @@ export class AuthService {
       .returning({ attempts: otpChallenges.attempts });
     if (!counted) throw new AuthError('INVALID_CODE', 'That code is wrong or has expired.');
 
-    if (!/^\d{6}$/.test(input.code) || !sameHash(hash(`${challenge.id}:${input.code}`), challenge.codeHash)) {
+    if (!/^\d{6}$/.test(code) || !sameHash(hash(`${challenge.id}:${code}`), challenge.codeHash)) {
       if (counted.attempts >= maxAttempts) {
         const minutes = await getSetting(this.db, 'auth.otp_lockout_minutes', countryCode);
         await this.db
@@ -140,16 +158,7 @@ export class AuthService {
       .where(and(eq(otpChallenges.id, challenge.id), isNull(otpChallenges.consumedAt)))
       .returning({ id: otpChallenges.id });
     if (!consumed) throw new AuthError('INVALID_CODE', 'That code is wrong or has expired.');
-
-    const inserted = await this.db
-      .insert(users)
-      .values({ phone, countryCode })
-      .onConflictDoNothing()
-      .returning(userColumns);
-    const user = inserted[0] ?? (await this.db.select(userColumns).from(users).where(eq(users.phone, phone)))[0]!;
-    if (BLOCKED.has(user.status)) throw new AuthError('ACCOUNT_BLOCKED', 'This account cannot sign in.');
-
-    return { ...(await this.startSession(user.id, user.countryCode, now)), isNewUser: inserted.length > 0, user };
+    return { phone, countryCode };
   }
 
   /** Rotates both tokens. Reusing an already-rotated refresh token revokes the session. */

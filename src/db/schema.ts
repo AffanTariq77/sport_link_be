@@ -481,6 +481,8 @@ export const bookings = pgTable(
     manualCustomerPhoneEncrypted: text('manual_customer_phone_encrypted'),
     matchId: uuid('match_id'),
     recurringSeriesId: uuid('recurring_series_id').references(() => recurringSeries.id),
+    // Extension (spec 6.3): charged as a new booking right after the one it extends.
+    extendsBookingId: uuid('extends_booking_id'),
     countsForBilling: boolean('counts_for_billing').notNull(),
     cancelledBy: text('cancelled_by'), // player | vendor | admin | system
     cancelReason: text('cancel_reason'),
