@@ -71,6 +71,14 @@ export class ChatController {
     return run(() => this.chat.openMatch(req.auth.user.id, matchId));
   }
   @UseGuards(UnlockedGuard)
+  @Post('conversations/find/:requestId')
+  @HttpCode(200)
+  @ApiOkResponse({ standardSchema: Opened })
+  openFind(@Req() req: AuthedRequest, @Param('requestId', { schema: Id }) requestId: string) {
+    return run(() => this.chat.openFind(req.auth.user.id, requestId));
+  }
+
+  @UseGuards(UnlockedGuard)
   @Post('conversations/team/:teamId')
   @HttpCode(200)
   @ApiOkResponse({ standardSchema: Opened })

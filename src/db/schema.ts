@@ -687,6 +687,78 @@ export const teamRatings = pgTable(
   (t) => [index('team_ratings_rating_idx').on(t.rating)],
 );
 
+// ---------- Find Players (spec 9) ----------
+// Where a player can be found, rounded to about 500 m (spec 9.2), and whether they want alerts.
+export const playerAvailability = pgTable('player_availability', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id),
+  location: geographyPoint('location'),
+  locatedAt: ts('located_at'),
+  // Foundation 4.5: alerts always, only while Available to play is on (default, Foundation 11), or never.
+  alertMode: text('alert_mode').notNull().default('available'), // always | available | off
+  available: boolean('available').notNull().default(false),
+  quietHoursOk: boolean('quiet_hours_ok').notNull().default(false),
+  sportSlugs: text('sport_slugs').array().notNull().default([]), // empty = every sport
+  guardianAllowsAdults: boolean('guardian_allows_adults').notNull().default(false), // minors (Foundation 10.2)
+  ...timestamps,
+});
+
+export const findRequestStatus = pgEnum('find_request_status', ['open', 'matched', 'closed', 'expired']);
+export const findResponseStatus = pgEnum('find_response_status', [
+  'notified',
+  'accepted',
+  'declined',
+  'selected',
+  'not_selected',
+  'removed',
+]);
+
+export const findRequests = pgTable(
+  'find_requests',
+  {
+    id: id(),
+    requesterId: uuid('requester_id')
+      .notNull()
+      .references(() => users.id),
+    sportId: uuid('sport_id')
+      .notNull()
+      .references(() => sports.id),
+    playersNeeded: smallint('players_needed').notNull(),
+    radiusKm: smallint('radius_km').notNull(),
+    location: geographyPoint('location').notNull(), // rounded
+    windowStart: ts('window_start').notNull(),
+    windowEnd: ts('window_end').notNull(),
+    filters: jsonb('filters').notNull().default({}),
+    status: findRequestStatus('status').notNull().default('open'),
+    matchId: uuid('match_id').references(() => matches.id),
+    lastBatchAt: ts('last_batch_at'),
+    closedAt: ts('closed_at'),
+    ...timestamps,
+  },
+  (t) => [index('find_requests_status_idx').on(t.status, t.windowEnd)],
+);
+
+export const findResponses = pgTable(
+  'find_responses',
+  {
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => findRequests.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    status: findResponseStatus('status').notNull().default('notified'),
+    distanceM: integer('distance_m').notNull(), // between rounded points; shown only as a band
+    notifiedAt: ts('notified_at').notNull().defaultNow(),
+    respondedAt: ts('responded_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.requestId, t.userId] }),
+    index('find_responses_user_idx').on(t.userId, t.notifiedAt),
+  ],
+);
+
 // ---------- Results, ratings and reviews (spec 11) ----------
 export const resultStatus = pgEnum('result_status', ['pending', 'confirmed', 'disputed', 'voided']);
 export const resultOutcome = pgEnum('result_outcome', ['a', 'b', 'draw']);

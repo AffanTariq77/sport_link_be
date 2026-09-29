@@ -58,6 +58,18 @@ export const DEFAULTS = {
   'minors.consent_version': '2026-09-v1' as string,
   // Spec 8.1: join requests close this long before the start.
   'match.join_cutoff_minutes': 120,
+  // Find Players (spec 9.3).
+  'find.max_radius_km': 25,
+  'find.requests_per_hour': 3,
+  'find.alerts_per_day': 10,
+  'find.batch_size': 10, // nearest first; the next batch goes out if not enough players accepted
+  'find.batch_minutes': 5,
+  'find.location_max_age_hours': 12, // older locations are not used for matching
+  'find.quiet_start_hour': 22, // local time; no alerts until quiet_end unless the player allows it
+  'find.quiet_end_hour': 7,
+  'find.chat_hours_after_close': 24,
+  // Foundation 10.2: minors and adults do not see each other in Find Players unless the guardian allows it.
+  'minors.find_players_separate': true,
   // Results (spec 11.1). OPEN: whether silence after the window counts as confirmed.
   'result.confirm_hours': 48,
   'result.silence_confirms': true,

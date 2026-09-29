@@ -5,6 +5,7 @@ import { loadEnv } from '../config.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { auditLog, moderationActions, users } from '../db/schema.js';
+import { FindService } from '../find/find.service.js';
 import { ResultsService } from '../ratings/results.service.js';
 import { TeamsService } from '../teams/teams.service.js';
 import { GuardianService } from '../users/guardian.service.js';
@@ -14,7 +15,7 @@ const LOCK_KEY = 7_411_203; // any constant shared by every API instance
 
 /**
  * Scheduled work: complete finished bookings, issue monthly invoices, run the overdue ladder, end expired
- * suspensions, confirm unanswered match results, replace banned team captains. Each job is idempotent, and a Postgres advisory lock lets only one instance run them at a time.
+ * suspensions, confirm unanswered match results, replace banned team captains, expire and re-batch Find Players requests. Each job is idempotent, and a Postgres advisory lock lets only one instance run them at a time.
  * ponytail: an in-process timer; move to BullMQ (spec 2) when jobs need retries, spreading or their own workers.
  */
 @Injectable()
@@ -28,6 +29,7 @@ export class JobsService implements OnApplicationBootstrap, OnApplicationShutdow
     @Inject(GuardianService) private readonly guardians: GuardianService,
     @Inject(ResultsService) private readonly results: ResultsService,
     @Inject(TeamsService) private readonly teams: TeamsService,
+    @Inject(FindService) private readonly find: FindService,
   ) {}
 
   onApplicationBootstrap() {
@@ -55,6 +57,7 @@ export class JobsService implements OnApplicationBootstrap, OnApplicationShutdow
           ...(await this.guardians.endGuardianshipAt18(now)),
           ...(await this.results.finaliseExpired(now)),
           ...(await this.teams.replaceBannedCaptains()),
+          ...(await this.find.runJobs(now)),
         };
         if (result.completed || result.issued || result.ladder || result.reinstated || result.turned18)
           this.log.log(JSON.stringify(result));

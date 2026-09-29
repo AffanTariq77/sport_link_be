@@ -10,6 +10,8 @@ import {
   conversationMembers,
   conversations,
   courts,
+  findRequests,
+  findResponses,
   matches,
   matchPlayers,
   messages,
@@ -50,6 +52,12 @@ export class ChatService {
     return { id: await this.getOrCreate('match', matchId) };
   }
 
+  /** Find Players group: the requester and the players they picked (spec 9.1 step 5). */
+  async openFind(userId: string, requestId: string) {
+    await this.assertFindMember(userId, requestId);
+    return { id: await this.getOrCreate('find_players', requestId) };
+  }
+
   /** Team chat: every active member (spec 10). */
   async openTeam(userId: string, teamId: string) {
     await this.assertTeamMember(userId, teamId);
@@ -70,6 +78,11 @@ export class ChatService {
       .leftJoin(matchPlayers, and(eq(matchPlayers.matchId, matches.id), eq(matchPlayers.userId, userId)))
       .where(or(eq(matches.hostId, userId), inArray(matchPlayers.status, [...PLAYING])));
     const bookingIds = this.db.select({ id: bookings.id }).from(bookings).where(eq(bookings.createdBy, userId));
+    const findIds = this.db
+      .select({ id: findRequests.id })
+      .from(findRequests)
+      .leftJoin(findResponses, and(eq(findResponses.requestId, findRequests.id), eq(findResponses.userId, userId)))
+      .where(or(eq(findRequests.requesterId, userId), eq(findResponses.status, 'selected')));
     const teamIds = this.db
       .select({ id: teamMembers.teamId })
       .from(teamMembers)
@@ -102,6 +115,7 @@ export class ChatService {
           and(eq(conversations.type, 'match'), inArray(conversations.refId, matchIds)),
           and(eq(conversations.type, 'booking'), inArray(conversations.refId, bookingIds)),
           and(eq(conversations.type, 'team'), inArray(conversations.refId, teamIds)),
+          and(eq(conversations.type, 'find_players'), inArray(conversations.refId, findIds)),
           and(eq(conversations.type, 'booking'), inArray(conversations.refId, venueBookingIds)),
           sql`${conversationMembers.userId} is not null`,
         ),
@@ -236,7 +250,9 @@ export class ChatService {
   /** Everyone in the chat except the sender and anyone who has blocked them. */
   private async recipients(c: typeof conversations.$inferSelect, senderId: string) {
     let ids: string[] = [];
-    if (c.type === 'team') {
+    if (c.type === 'find_players') {
+      ids = await this.findMembers(c.refId!);
+    } else if (c.type === 'team') {
       const members = await this.db
         .select({ id: teamMembers.userId })
         .from(teamMembers)
@@ -303,7 +319,7 @@ export class ChatService {
 
   // ---------- access ----------
 
-  private async getOrCreate(type: 'match' | 'booking' | 'team', refId: string) {
+  private async getOrCreate(type: 'match' | 'booking' | 'team' | 'find_players', refId: string) {
     const [existing] = await this.db
       .select({ id: conversations.id })
       .from(conversations)
@@ -325,6 +341,7 @@ export class ChatService {
     if (c.type === 'match') await this.assertMatchMember(userId, c.refId);
     else if (c.type === 'booking') await this.assertBookingMember(userId, c.refId);
     else if (c.type === 'team') await this.assertTeamMember(userId, c.refId);
+    else if (c.type === 'find_players') await this.assertFindMember(userId, c.refId);
     else throw new ChatError('NOT_FOUND', 'Chat not found.');
     return c;
   }
@@ -338,6 +355,24 @@ export class ChatService {
     const ok =
       m && (m.hostId === userId || (m.playerStatus && (PLAYING as readonly string[]).includes(m.playerStatus)));
     if (!ok) throw new ChatError('NOT_FOUND', 'Chat not found.');
+  }
+
+  /** Open while the request lives, and for find.chat_hours_after_close after it closes or expires (spec 9.3). */
+  private async findMembers(requestId: string, now = new Date()) {
+    const [r] = await this.db.select().from(findRequests).where(eq(findRequests.id, requestId));
+    if (!r) return [];
+    const hours = await getSetting(this.db, 'find.chat_hours_after_close');
+    const ended = r.closedAt ?? (r.windowEnd < now ? r.windowEnd : null);
+    if (ended && now.getTime() > ended.getTime() + hours * 3_600_000) return [];
+    const picked = await this.db
+      .select({ id: findResponses.userId })
+      .from(findResponses)
+      .where(and(eq(findResponses.requestId, requestId), eq(findResponses.status, 'selected')));
+    return [r.requesterId, ...picked.map((p) => p.id)];
+  }
+
+  private async assertFindMember(userId: string, requestId: string) {
+    if (!(await this.findMembers(requestId)).includes(userId)) throw new ChatError('NOT_FOUND', 'Chat not found.');
   }
 
   private async assertTeamMember(userId: string, teamId: string) {
@@ -403,7 +438,17 @@ export class ChatService {
     const ts = teamRefs.length
       ? await this.db.select({ id: teams.id, name: teams.name }).from(teams).where(inArray(teams.id, teamRefs))
       : [];
+    const findRefs = rows.filter((r) => r.type === 'find_players').map((r) => r.refId!);
+    const fs = findRefs.length
+      ? await this.db
+          .select({ id: findRequests.id, sport: sports.name })
+          .from(findRequests)
+          .innerJoin(sports, eq(sports.id, findRequests.sportId))
+          .where(inArray(findRequests.id, findRefs))
+      : [];
     for (const r of rows) {
+      const f = fs.find((x) => x.id === r.refId);
+      if (f) out.set(r.id, `Find Players · ${f.sport}`);
       const t = ts.find((x) => x.id === r.refId);
       if (t) out.set(r.id, `Team · ${t.name}`);
       const m = ms.find((x) => x.id === r.refId);

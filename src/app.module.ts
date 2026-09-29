@@ -38,6 +38,8 @@ import { AdminResultsController, RatingsController } from './ratings/ratings.con
 import { ResultsService } from './ratings/results.service.js';
 import { AdminTeamsController, TeamsController } from './teams/teams.controller.js';
 import { TeamsService } from './teams/teams.service.js';
+import { FindController } from './find/find.controller.js';
+import { FindService } from './find/find.service.js';
 import { VendorsController, VenuePhotosController } from './vendors/vendors.controller.js';
 import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
@@ -65,6 +67,7 @@ import { HealthController } from './health/health.controller.js';
     AdminResultsController,
     TeamsController,
     AdminTeamsController,
+    FindController,
     CalendarController,
     MatchesController,
     ChatController,
@@ -85,6 +88,7 @@ import { HealthController } from './health/health.controller.js';
     ResultsService,
     PlayersService,
     TeamsService,
+    FindService,
     CalendarService,
     MatchesService,
     ChatService,

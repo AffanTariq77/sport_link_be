@@ -63,7 +63,7 @@ export type MatchFilters = {
   minRating?: number;
   maxRating?: number;
 };
-type Viewer = {
+export type Viewer = {
   id: string;
   dob: string | null;
   gender: Gender | null;
