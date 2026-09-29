@@ -7,8 +7,10 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   customType,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -623,6 +625,116 @@ export const messages = pgTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('messages_conversation_created_idx').on(t.conversationId, t.createdAt)],
+);
+
+// ---------- Results, ratings and reviews (spec 11) ----------
+export const resultStatus = pgEnum('result_status', ['pending', 'confirmed', 'disputed', 'voided']);
+export const resultOutcome = pgEnum('result_outcome', ['a', 'b', 'draw']);
+
+// One live result per match. Side A and side B list the participants (host included) on each side.
+export const matchResults = pgTable(
+  'match_results',
+  {
+    id: id(),
+    matchId: uuid('match_id')
+      .notNull()
+      .references(() => matches.id),
+    submittedBy: uuid('submitted_by')
+      .notNull()
+      .references(() => users.id),
+    sideA: uuid('side_a').array().notNull(),
+    sideB: uuid('side_b').array().notNull(),
+    outcome: resultOutcome('outcome').notNull(),
+    score: text('score'),
+    status: resultStatus('status').notNull().default('pending'),
+    confirmBy: ts('confirm_by').notNull(), // the other side confirms or disputes before this
+    respondedBy: uuid('responded_by').references(() => users.id),
+    disputeNote: text('dispute_note'),
+    decidedBy: uuid('decided_by'), // admin who settled a dispute or voided it
+    ratedAt: ts('rated_at'), // ratings applied
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex('match_results_live_uq')
+      .on(t.matchId)
+      .where(sql`status <> 'voided'`),
+    index('match_results_status_idx').on(t.status, t.confirmBy),
+  ],
+);
+
+export const ratingKind = pgEnum('rating_kind', ['skill', 'tournament']);
+
+// Glicko-2 on the public scale (1500 / 350). Teams get their own rows when teams exist (spec 12.1).
+export const ratings = pgTable(
+  'ratings',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    sportId: uuid('sport_id')
+      .notNull()
+      .references(() => sports.id),
+    kind: ratingKind('kind').notNull().default('skill'),
+    rating: doublePrecision('rating').notNull(),
+    deviation: doublePrecision('deviation').notNull(),
+    volatility: doublePrecision('volatility').notNull(),
+    games: integer('games').notNull().default(0),
+    lastPlayedAt: ts('last_played_at'),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex('ratings_user_sport_kind_uq').on(t.userId, t.sportId, t.kind),
+    index('ratings_leaderboard_idx').on(t.sportId, t.kind, t.rating),
+  ],
+);
+
+// What each result changed, so an admin void can put ratings back (spec 11.4).
+export const ratingChanges = pgTable(
+  'rating_changes',
+  {
+    id: id(),
+    resultId: uuid('result_id')
+      .notNull()
+      .references(() => matchResults.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    sportId: uuid('sport_id')
+      .notNull()
+      .references(() => sports.id),
+    before: jsonb('before').notNull(), // { rating, deviation, volatility, games, lastPlayedAt }
+    after: jsonb('after').notNull(),
+    revertedAt: ts('reverted_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('rating_changes_user_idx').on(t.userId, t.createdAt)],
+);
+
+// Behaviour only; never touches skill rating (spec 11.6).
+export const reviews = pgTable(
+  'reviews',
+  {
+    id: id(),
+    matchId: uuid('match_id')
+      .notNull()
+      .references(() => matches.id),
+    fromUserId: uuid('from_user_id')
+      .notNull()
+      .references(() => users.id),
+    toUserId: uuid('to_user_id')
+      .notNull()
+      .references(() => users.id),
+    stars: smallint('stars').notNull(),
+    tags: text('tags').array().notNull().default([]),
+    comment: text('comment'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('reviews_once_uq').on(t.matchId, t.fromUserId, t.toUserId),
+    index('reviews_to_idx').on(t.toUserId),
+    check('reviews_stars_ck', sql`${t.stars} between 1 and 5`),
+  ],
 );
 
 // ---------- Notifications ----------

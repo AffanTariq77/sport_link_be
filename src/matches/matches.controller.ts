@@ -33,6 +33,13 @@ const Filters = z
     maxAge: z.int().min(5).max(100).optional(),
     gender: z.enum(gender.enumValues).nullable().optional().meta({ description: 'female for women-only' }),
     verifiedOnly: z.boolean().optional(),
+    minRating: z
+      .int()
+      .min(0)
+      .max(4000)
+      .optional()
+      .meta({ description: 'Skill rating range (Glicko-2, unrated = 1500)' }),
+    maxRating: z.int().min(0).max(4000).optional(),
   })
   .meta({ id: 'MatchFilters' });
 const CreateBody = z

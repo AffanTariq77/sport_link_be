@@ -58,6 +58,31 @@ export const DEFAULTS = {
   'minors.consent_version': '2026-09-v1' as string,
   // Spec 8.1: join requests close this long before the start.
   'match.join_cutoff_minutes': 120,
+  // Results (spec 11.1). OPEN: whether silence after the window counts as confirmed.
+  'result.confirm_hours': 48,
+  'result.silence_confirms': true,
+  // Glicko-2 (spec 11.2), public scale.
+  'rating.start': 1500,
+  'rating.start_deviation': 350,
+  'rating.start_volatility': 0.06,
+  'rating.tau': 0.5,
+  'rating.inactivity_period_days': 30, // deviation grows once per idle period
+  // Anti-abuse (spec 11.4): after this many rated games against the same opponent in the window, changes shrink.
+  'rating.repeat_opponent_games': 3,
+  'rating.repeat_opponent_days': 30,
+  'rating.repeat_opponent_factor': 0.5,
+  // Tiers (spec 11.5): the highest band whose minimum the rating reaches. Provisional above this deviation.
+  'rating.tiers': [
+    { name: 'Bronze', min: 0 },
+    { name: 'Silver', min: 1400 },
+    { name: 'Gold', min: 1600 },
+    { name: 'Platinum', min: 1800 },
+    { name: 'Elite', min: 2000 },
+  ] as { name: string; min: number }[],
+  'rating.provisional_deviation': 110,
+  // Behaviour reviews (spec 11.6).
+  'review.window_hours': 48,
+  'review.tags': ['on_time', 'friendly', 'fair_play', 'skilled', 'good_communication', 'team_player'] as string[],
   'admin.session_hours': 8,
   'admin.max_failed_logins': 5,
   'admin.lockout_minutes': 15,

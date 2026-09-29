@@ -15,6 +15,7 @@ import {
   matchPlayers,
   paymentAccounts,
   paymentMethod,
+  ratings,
   reports,
   sports,
   users,
@@ -52,8 +53,23 @@ export class MatchError extends Error {
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Gender = (typeof gender.enumValues)[number];
-export type MatchFilters = { minAge?: number; maxAge?: number; gender?: Gender | null; verifiedOnly?: boolean };
-type Viewer = { id: string; dob: string | null; gender: Gender | null; verified: boolean };
+export type MatchFilters = {
+  minAge?: number;
+  maxAge?: number;
+  gender?: Gender | null;
+  verifiedOnly?: boolean;
+  minRating?: number;
+  maxRating?: number;
+};
+type Viewer = {
+  id: string;
+  dob: string | null;
+  gender: Gender | null;
+  verified: boolean;
+  /** Skill rating per sport id; unrated players count as the start rating. */
+  ratings?: Map<string, number>;
+  startRating?: number;
+};
 
 // Join requests that hold a place: approved players have a share to pay, confirmed ones have paid.
 const TAKING_PLACE = ['approved', 'confirmed'] as const;
@@ -122,6 +138,9 @@ export class MatchesService {
         'INVALID_MATCH',
         'Leave at least one open place, and count yourself in the players you bring.',
       );
+    }
+    if (input.filters.minRating && input.filters.maxRating && input.filters.minRating > input.filters.maxRating) {
+      throw new MatchError('INVALID_MATCH', 'The lowest rating must be below the highest.');
     }
     if (input.filters.minAge && input.filters.maxAge && input.filters.minAge > input.filters.maxAge) {
       throw new MatchError('INVALID_MATCH', 'The minimum age must not be above the maximum age.');
@@ -202,7 +221,7 @@ export class MatchesService {
       .orderBy(asc(matches.startAt))
       .limit(100);
     const summaries = await this.summarise(rows);
-    return summaries.filter((m) => m.host.id === userId || eligible(viewer, m.filters, m.startAt));
+    return summaries.filter((m) => m.host.id === userId || eligible(viewer, m.filters, m.startAt, m.sportId));
   }
 
   /** Matches the player hosts or has asked to join. */
@@ -238,7 +257,7 @@ export class MatchesService {
       .where(eq(matchPlayers.matchId, matchId))
       .orderBy(asc(matchPlayers.createdAt));
     const me = players.find((p) => p.userId === userId) ?? null;
-    if (!isHost && !me && !eligible(await this.viewer(userId), m.filters, m.startAt)) {
+    if (!isHost && !me && !eligible(await this.viewer(userId), m.filters, m.startAt, m.sportId)) {
       throw new MatchError('NOT_FOUND', 'Match not found.');
     }
     return {
@@ -267,7 +286,7 @@ export class MatchesService {
       .select({ id: blocks.blockerId })
       .from(blocks)
       .where(and(eq(blocks.blockerId, m.hostId), eq(blocks.blockedId, userId)));
-    if (blocked || !eligible(await this.viewer(userId), m.filters as MatchFilters, m.startAt)) {
+    if (blocked || !eligible(await this.viewer(userId), m.filters as MatchFilters, m.startAt, m.sportId)) {
       throw new MatchError('NOT_ELIGIBLE', 'This match is not open to you.');
     }
     await this.assertNoOverlap(userId, m.startAt, m.endAt, matchId);
@@ -542,6 +561,7 @@ export class MatchesService {
         hostBrings: matches.hostBrings,
         filters: matches.filters,
         sport: sports.name,
+        sportId: matches.sportId,
         host: { id: users.id, name: users.name },
         bookingId: matches.bookingId,
         unlistedVenueName: matches.unlistedVenueName,
@@ -574,6 +594,7 @@ export class MatchesService {
       id: r.id,
       status: r.status,
       sport: r.sport,
+      sportId: r.sportId,
       startAt: r.startAt,
       endAt: r.endAt,
       joinCutoffAt: r.joinCutoffAt!,
@@ -603,7 +624,18 @@ export class MatchesService {
       .from(verifications)
       .where(and(eq(verifications.userId, userId), eq(verifications.status, 'approved')))
       .limit(1);
-    return { id: userId, dob: u?.dob ?? null, gender: u?.gender ?? null, verified: !!v };
+    const rated = await this.db
+      .select({ sportId: ratings.sportId, rating: ratings.rating })
+      .from(ratings)
+      .where(and(eq(ratings.userId, userId), eq(ratings.kind, 'skill')));
+    return {
+      id: userId,
+      dob: u?.dob ?? null,
+      gender: u?.gender ?? null,
+      verified: !!v,
+      ratings: new Map(rated.map((r) => [r.sportId, r.rating])),
+      startRating: await getSetting(this.db, 'rating.start'),
+    };
   }
 
   private async getOpen(matchId: string, now: Date) {
@@ -691,8 +723,13 @@ export class MatchesService {
 }
 
 /** True if the player meets the match filters (Foundation 4.3). Unknown age or gender does not pass a filter on it. */
-export function eligible(viewer: Viewer, filters: MatchFilters, at: Date) {
+export function eligible(viewer: Viewer, filters: MatchFilters, at: Date, sportId?: string) {
   if (filters.verifiedOnly && !viewer.verified) return false;
+  if (filters.minRating || filters.maxRating) {
+    const r = (sportId && viewer.ratings?.get(sportId)) || viewer.startRating || 1500;
+    if (filters.minRating && r < filters.minRating) return false;
+    if (filters.maxRating && r > filters.maxRating) return false;
+  }
   if (filters.gender && viewer.gender !== filters.gender) return false;
   if (filters.minAge || filters.maxAge) {
     if (!viewer.dob) return false;
