@@ -182,6 +182,8 @@ const Disputed = z
       matchId: z.uuid(),
       sideA: z.array(z.uuid()),
       sideB: z.array(z.uuid()),
+      sideANames: z.array(z.string()),
+      sideBNames: z.array(z.string()),
       outcome: Outcome,
       score: z.string().nullable(),
       disputeNote: z.string().nullable(),

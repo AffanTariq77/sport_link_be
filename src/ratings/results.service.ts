@@ -220,8 +220,8 @@ export class ResultsService {
 
   // ---------- admin ----------
 
-  listDisputed() {
-    return this.db
+  async listDisputed() {
+    const rows = await this.db
       .select({
         id: matchResults.id,
         matchId: matchResults.matchId,
@@ -239,6 +239,12 @@ export class ResultsService {
       .where(eq(matchResults.status, 'disputed'))
       .orderBy(matchResults.createdAt)
       .limit(100);
+    const ids = [...new Set(rows.flatMap((r) => [...r.sideA, ...r.sideB]))];
+    const names = ids.length
+      ? await this.db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))
+      : [];
+    const name = (id: string) => names.find((n) => n.id === id)?.name ?? 'Player';
+    return rows.map((r) => ({ ...r, sideANames: r.sideA.map(name), sideBNames: r.sideB.map(name) }));
   }
 
   /** Decide a dispute (final, logged) or void a result; voiding a rated result puts the ratings back. */
