@@ -168,6 +168,7 @@ export class VenuesService {
         cancelRefund: venuePolicies.cancelRefund,
         cancelWindowHours: venuePolicies.cancelWindowHours,
         noShowRefund: venuePolicies.noShowRefund,
+        recurringAllowed: venuePolicies.recurringAllowed,
       })
       .from(venuePolicies)
       .where(eq(venuePolicies.branchId, branchId));

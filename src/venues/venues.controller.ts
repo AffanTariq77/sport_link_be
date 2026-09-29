@@ -30,6 +30,7 @@ const Policy = z
     cancelRefund: z.boolean(),
     cancelWindowHours: z.int(),
     noShowRefund: z.boolean(),
+    recurringAllowed: z.boolean().meta({ description: 'Weekly bookings allowed' }),
   })
   .meta({ id: 'VenuePolicy' });
 const Venue = VenueSummary.omit({ sports: true, courtCount: true, fromPricePerHour: true })
