@@ -71,6 +71,13 @@
       "when": 1790591461734,
       "tag": "0009_refunds_money",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790664510769,
+      "tag": "0010_notifications",
+      "breakpoints": true
     }
   ]
 }

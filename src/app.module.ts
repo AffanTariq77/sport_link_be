@@ -19,6 +19,9 @@ import { BookingsService } from './bookings/bookings.service.js';
 import { loadEnv } from './config.js';
 import { MatchesController } from './matches/matches.controller.js';
 import { MatchesService } from './matches/matches.service.js';
+import { NotificationsController } from './notifications/notifications.controller.js';
+import { NotificationsService } from './notifications/notifications.service.js';
+import { ExpoPushSender, LogPushSender, PUSH } from './notifications/push.js';
 import { PaymentsController } from './payments/payments.controller.js';
 import { RefundsController } from './refunds/refunds.controller.js';
 import { RefundsService } from './refunds/refunds.service.js';
@@ -54,6 +57,7 @@ import { HealthController } from './health/health.controller.js';
     CalendarController,
     MatchesController,
     ChatController,
+    NotificationsController,
     RefundsController,
     VendorBillingController,
     AdminBillingController,
@@ -69,6 +73,14 @@ import { HealthController } from './health/health.controller.js';
     CalendarService,
     MatchesService,
     ChatService,
+    NotificationsService,
+    {
+      provide: PUSH,
+      useFactory: () => {
+        const env = loadEnv();
+        return env.PUSH_PROVIDER === 'expo' ? new ExpoPushSender(env.EXPO_ACCESS_TOKEN) : new LogPushSender();
+      },
+    },
     RefundsService,
     BillingService,
     JobsService,

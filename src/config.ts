@@ -19,11 +19,18 @@ const Env = z
     // Where uploaded documents are stored. 'local' is a folder for development; S3 is added once hosting is chosen.
     STORAGE_DRIVER: z.enum(['local']).default('local'),
     STORAGE_DIR: z.string().default('.storage'),
+    // Phone push notifications. 'log' prints them to the API log (development); 'expo' sends them for real.
+    PUSH_PROVIDER: z.enum(['log', 'expo']).default('log'),
+    EXPO_ACCESS_TOKEN: z.string().optional(),
     // Development only: a fixed admin two-factor code, like DEV_OTP_CODE. Refused in production.
     DEV_TOTP_CODE: z
       .string()
       .regex(/^\d{6}$/)
       .optional(),
+  })
+  .refine((e) => !(e.NODE_ENV === 'production' && e.PUSH_PROVIDER === 'log'), {
+    message: 'PUSH_PROVIDER=log is not allowed in production',
+    path: ['PUSH_PROVIDER'],
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.STORAGE_DRIVER === 'local'), {
     message: 'STORAGE_DRIVER=local is not allowed in production',

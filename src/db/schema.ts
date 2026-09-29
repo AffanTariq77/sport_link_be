@@ -192,16 +192,20 @@ export const verifications = pgTable(
   ],
 );
 
-export const devices = pgTable('devices', {
-  id: id(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id),
-  deviceFingerprint: text('device_fingerprint').notNull(),
-  pushToken: text('push_token'),
-  platform: text('platform').notNull(), // ios | android | web
-  lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
-});
+export const devices = pgTable(
+  'devices',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    deviceFingerprint: text('device_fingerprint').notNull(),
+    pushToken: text('push_token'),
+    platform: text('platform').notNull(), // ios | android | web
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('devices_user_fingerprint_uq').on(t.userId, t.deviceFingerprint)],
+);
 
 // ---------- Auth ----------
 // One row per OTP sent. Only a hash of the code is stored. locked_until is set after too many wrong attempts.
@@ -619,6 +623,27 @@ export const messages = pgTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('messages_conversation_created_idx').on(t.conversationId, t.createdAt)],
+);
+
+// ---------- Notifications ----------
+// Every notification is stored (the in-app list and the delivery log, spec 15); pushed_at records the push.
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    kind: text('kind').notNull(), // booking | payment | match | chat | refund | verification | vendor | billing | guardian | moderation
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    link: text('link'), // app path to open, for example /matches/<id>
+    refId: text('ref_id'), // for grouping, for example a conversation id
+    readAt: ts('read_at'),
+    pushedAt: ts('pushed_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('notifications_user_created_idx').on(t.userId, t.createdAt)],
 );
 
 // ---------- Trust and safety ----------

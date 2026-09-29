@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, gt, inArray, lt, ne, or, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
@@ -21,6 +21,7 @@ import {
   verifications,
 } from '../db/schema.js';
 import { ageOn } from '../users/profile.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { refundShares } from '../refunds/refunds.service.js';
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
@@ -77,7 +78,26 @@ export class MatchesService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(DocumentCrypto) private readonly crypto: DocumentCrypto,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
   ) {}
+
+  /** Short "Padel on Thu 1 Oct" label for notifications. */
+  private async label(matchId: string) {
+    const [m] = await this.db
+      .select({ sport: sports.name, startAt: matches.startAt, hostId: matches.hostId })
+      .from(matches)
+      .innerJoin(sports, eq(sports.id, matches.sportId))
+      .where(eq(matches.id, matchId));
+    const day = m
+      ? new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Karachi',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+        }).format(m.startAt)
+      : '';
+    return { text: m ? `${m.sport} on ${day}` : 'your match', hostId: m?.hostId };
+  }
 
   /**
    * Host creates a match (spec 8). At a listed venue it uses the host's own booking, which must be confirmed or
@@ -264,6 +284,16 @@ export class MatchesService {
       .from(matchPlayers)
       .where(and(eq(matchPlayers.matchId, matchId), eq(matchPlayers.userId, userId)));
     if (row?.status !== 'requested') throw new MatchError('ALREADY_REQUESTED', 'You have already asked to join.');
+    if (this.notes) {
+      const [me] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+      const { text } = await this.label(matchId);
+      await this.notes.notify(m.hostId, {
+        kind: 'match',
+        title: 'Join request',
+        body: `${me?.name ?? 'A player'} wants to join ${text}.`,
+        link: `/matches/${matchId}`,
+      });
+    }
     return { status: 'requested' as const };
   }
 
@@ -272,6 +302,31 @@ export class MatchesService {
    * at an unlisted venue there is nothing to pay, so they are confirmed. Once full, approvals go to the waitlist.
    */
   async decide(hostId: string, matchId: string, playerId: string, approve: boolean, now = new Date()) {
+    const result = await this.decideTx(hostId, matchId, playerId, approve, now);
+    if (this.notes) {
+      const { text } = await this.label(matchId);
+      const body: Record<string, string> = {
+        approved: `You are in for ${text}. Pay your share to confirm your place.`,
+        confirmed: `You are in for ${text}.`,
+        declined: `The host did not accept your request for ${text}.`,
+        waitlisted: `${text} is full. You are on the waitlist.`,
+      };
+      await this.notes.notify(playerId, {
+        kind: 'match',
+        title:
+          result.status === 'declined'
+            ? 'Request declined'
+            : result.status === 'waitlisted'
+              ? 'On the waitlist'
+              : 'Request approved',
+        body: body[result.status]!,
+        link: `/matches/${matchId}`,
+      });
+    }
+    return result;
+  }
+
+  private async decideTx(hostId: string, matchId: string, playerId: string, approve: boolean, now: Date) {
     return this.db.transaction(async (tx) => {
       const [m] = await tx.select().from(matches).where(eq(matches.id, matchId)).for('update');
       if (!m) throw new MatchError('NOT_FOUND', 'Match not found.');
@@ -337,7 +392,14 @@ export class MatchesService {
     if (!m) throw new MatchError('NOT_FOUND', 'Match not found.');
     if (m.hostId !== hostId) throw new MatchError('NOT_HOST', 'Only the host can do this.');
     if (m.startAt <= now) throw new MatchError('CLOSED', 'The match has started.');
-    return this.leaveAs(matchId, playerId, 'removed', now);
+    const result = await this.leaveAs(matchId, playerId, 'removed', now);
+    await this.notes?.notify(playerId, {
+      kind: 'match',
+      title: 'Removed from a match',
+      body: `The host removed you from ${(await this.label(matchId)).text}. Any refund follows the venue policy.`,
+      link: `/matches/${matchId}`,
+    });
+    return result;
   }
 
   /** Player leaves. Refunds of a paid share follow the booking policy (handled with cancellations). */
@@ -366,6 +428,26 @@ export class MatchesService {
         await refundShares(tx, { bookingId: booking.id, shareIds, reason: 'match_cancelled', full: false, now });
       }
     });
+    if (this.notes) {
+      const players = await this.db
+        .select({ id: matchPlayers.userId })
+        .from(matchPlayers)
+        .where(
+          and(
+            eq(matchPlayers.matchId, matchId),
+            inArray(matchPlayers.status, ['requested', 'approved', 'confirmed', 'waitlisted']),
+          ),
+        );
+      await this.notes.notify(
+        players.map((p) => p.id),
+        {
+          kind: 'match',
+          title: 'Match cancelled',
+          body: `The host cancelled ${(await this.label(matchId)).text}. Any refund follows the venue policy.`,
+          link: `/matches/${matchId}`,
+        },
+      );
+    }
     return { status: 'cancelled' as const };
   }
 

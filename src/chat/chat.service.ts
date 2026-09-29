@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -17,6 +17,7 @@ import {
   sports,
   users,
 } from '../db/schema.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { getSetting } from '../settings.js';
 import { vendorAccess } from '../vendors/access.js';
 import { containsPhoneNumber } from './phone-detect.js';
@@ -36,7 +37,10 @@ const PAGE = 100;
 
 @Injectable()
 export class ChatService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
+  ) {}
 
   /** The match group chat: host plus approved and confirmed players (spec 10). Created on first use. */
   async openMatch(userId: string, matchId: string) {
@@ -167,7 +171,7 @@ export class ChatService {
     input: { body: string; confirmPhone?: boolean },
     now = new Date(),
   ) {
-    await this.assertMember(userId, conversationId);
+    const convo = await this.assertMember(userId, conversationId);
     const body = input.body.trim();
     if (!body) throw new ChatError('EMPTY', 'Type a message first.');
     const hasPhone = containsPhoneNumber(body);
@@ -177,7 +181,7 @@ export class ChatService {
         'This looks like a phone number. For your safety, keep chatting in SportsLink until you know the other players. Send it anyway?',
       );
     }
-    return this.db.transaction(async (tx) => {
+    const sent = await this.db.transaction(async (tx) => {
       const [m] = await tx
         .insert(messages)
         .values({ conversationId, senderId: userId, kind: 'text', body, flaggedPhone: hasPhone, createdAt: now })
@@ -201,6 +205,42 @@ export class ChatService {
         });
       return m!;
     });
+    if (this.notes) {
+      const [sender] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+      // One unread chat notification per conversation; the chat itself shows every message.
+      await this.notes.notify(await this.recipients(convo, userId), {
+        kind: 'chat',
+        title: `New message from ${sender?.name ?? 'a player'}`,
+        body: body.length > 80 ? `${body.slice(0, 77)}...` : body,
+        link: `/chats/${conversationId}`,
+        refId: conversationId,
+        collapse: true,
+      });
+    }
+    return sent;
+  }
+
+  /** Everyone in the chat except the sender and anyone who has blocked them. */
+  private async recipients(c: typeof conversations.$inferSelect, senderId: string) {
+    let ids: string[] = [];
+    if (c.type === 'match') {
+      const [m] = await this.db.select({ hostId: matches.hostId }).from(matches).where(eq(matches.id, c.refId!));
+      const players = await this.db
+        .select({ id: matchPlayers.userId })
+        .from(matchPlayers)
+        .where(and(eq(matchPlayers.matchId, c.refId!), inArray(matchPlayers.status, [...PLAYING])));
+      ids = [m?.hostId, ...players.map((p) => p.id)].filter((x): x is string => !!x);
+    } else {
+      const [b] = await this.db
+        .select({ createdBy: bookings.createdBy, vendorId: branches.vendorId, branchId: branches.id })
+        .from(bookings)
+        .innerJoin(courts, eq(courts.id, bookings.courtId))
+        .innerJoin(branches, eq(branches.id, courts.branchId))
+        .where(eq(bookings.id, c.refId!));
+      if (b) ids = [b.createdBy!, ...(await this.notes!.vendorRecipients(b.vendorId, 'view_bookings', b.branchId))];
+    }
+    const blockers = await this.db.select({ id: blocks.blockerId }).from(blocks).where(eq(blocks.blockedId, senderId));
+    return ids.filter((id) => id !== senderId && !blockers.some((x) => x.id === id));
   }
 
   /** Report a chat: the last messages are attached for the moderators, who can only read reported chats (spec 14). */

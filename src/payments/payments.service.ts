@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
@@ -19,6 +19,8 @@ import {
 import { getSetting } from '../settings.js';
 import { DocumentCrypto } from '../verification/document-crypto.js';
 import { refreshMatchStatus } from '../matches/matches.service.js';
+import { money } from '../money.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { vendorAccess } from '../vendors/access.js';
 
 export class PaymentError extends Error {
@@ -50,6 +52,7 @@ export class PaymentsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(DocumentCrypto) private readonly crypto: DocumentCrypto,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
   ) {}
 
   /** What the player needs to pay the advance: the venue's approved accounts (Foundation 8.1). */
@@ -123,7 +126,7 @@ export class PaymentsService {
     }
 
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         const [locked] = await tx.select().from(bookings).where(eq(bookings.id, bookingId)).for('update');
         const status = effectiveStatus(locked!, now);
         if (status === 'pending_payment') {
@@ -162,6 +165,25 @@ export class PaymentsService {
         const [after] = await tx.select().from(bookings).where(eq(bookings.id, bookingId));
         return { status: effectiveStatus(after!, now), paymentDeadlineAt: after!.paymentDeadlineAt };
       });
+      if (payAtVenue) {
+        await this.notes?.notify(userId, {
+          kind: 'booking',
+          title: 'Booking confirmed',
+          body: 'Your slot is booked. Pay at the venue.',
+          link: '/bookings',
+        });
+      } else if (this.notes) {
+        await this.notes.notify(
+          await this.notes.vendorRecipients(booking.vendorId, 'confirm_payments', booking.branchId),
+          {
+            kind: 'payment',
+            title: 'Payment to check',
+            body: `${money(booking.advanceDue, booking.currency)} by ${input.method.replace('_', ' ')}, reference ${reference}.`,
+            link: '/vendor/payments',
+          },
+        );
+      }
+      return result;
     } catch (err) {
       if (!hasPgCode(err, UNIQUE_VIOLATION)) throw err;
       // Spec 7.1: a transaction ID used on another booking is rejected and flagged.
@@ -227,7 +249,7 @@ export class PaymentsService {
 
   /** Vendor confirms the money arrived. The booking is confirmed once confirmed payments cover the advance. */
   async confirm(shareId: string, userId: string, now = new Date()) {
-    return this.decide(shareId, userId, now, async (tx, share, booking) => {
+    const done = await this.decide(shareId, userId, now, async (tx, share, booking) => {
       await tx
         .update(bookingShares)
         .set({ status: 'confirmed', confirmedBy: userId, confirmedAt: now, updatedAt: now })
@@ -247,11 +269,28 @@ export class PaymentsService {
         .returning({ matchId: matchPlayers.matchId });
       if (joiner) await refreshMatchStatus(tx, joiner.matchId);
     });
+    await this.notes?.notify(
+      done.playerId,
+      done.matchId
+        ? {
+            kind: 'match',
+            title: 'Your place is confirmed',
+            body: 'The venue confirmed your payment. See you on the court.',
+            link: `/matches/${done.matchId}`,
+          }
+        : {
+            kind: 'booking',
+            title: 'Booking confirmed',
+            body: 'The venue confirmed your advance payment.',
+            link: '/bookings',
+          },
+    );
+    return { id: done.id };
   }
 
   /** Vendor says the money did not arrive. Opens a dispute (spec 7.1); the player may submit again before the deadline. */
   async reject(shareId: string, userId: string, reason: string, now = new Date()) {
-    return this.decide(shareId, userId, now, async (tx, share, booking) => {
+    const done = await this.decide(shareId, userId, now, async (tx, share, booking) => {
       await tx
         .update(bookingShares)
         .set({ status: 'rejected', confirmedBy: userId, confirmedAt: now, updatedAt: now })
@@ -266,6 +305,13 @@ export class PaymentsService {
         evidence: { shareId: share.id, method: share.method },
       });
     });
+    await this.notes?.notify(done.playerId, {
+      kind: 'payment',
+      title: 'Payment not found',
+      body: `The venue could not find your payment: ${reason} Check the transaction ID and send it again.`,
+      link: done.matchId ? `/matches/${done.matchId}` : `/bookings/${done.bookingId}/pay`,
+    });
+    return { id: done.id };
   }
 
   private async decide(
@@ -296,7 +342,7 @@ export class PaymentsService {
         throw new PaymentError('BOOKING_EXPIRED', 'This booking expired before the payment was checked.');
       }
       await apply(tx, row.share, row.booking);
-      return { id: shareId };
+      return { id: shareId, playerId: row.share.userId, bookingId: row.booking.id, matchId: joiner?.matchId ?? null };
     });
   }
 
@@ -316,6 +362,7 @@ export class PaymentsService {
         paymentDeadlineAt: bookings.paymentDeadlineAt,
         policySnapshot: bookings.policySnapshot,
         vendorId: branches.vendorId,
+        branchId: branches.id,
         timezone: branches.timezone,
         countryCode: vendors.countryCode,
       })

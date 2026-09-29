@@ -1,6 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { Db } from '../db/client.js';
 import {
   auditLog,
@@ -50,6 +51,7 @@ export class AdminService {
     @Inject(DB) private readonly db: Db,
     @Inject(STORAGE) private readonly storage: FileStorage,
     @Inject(DocumentCrypto) private readonly crypto: DocumentCrypto,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
   ) {}
 
   /** Counts for the dashboard queues. */
@@ -138,7 +140,7 @@ export class AdminService {
     actor: Actor,
     now = new Date(),
   ) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [v] = await tx.select().from(verifications).where(eq(verifications.id, id)).for('update');
       if (!v) throw new AdminError('NOT_FOUND', 'Verification not found.');
       if (v.status !== 'pending') throw new AdminError('NOT_PENDING', 'This verification was already decided.');
@@ -166,6 +168,20 @@ export class AdminService {
       });
       return { id, status: after.status };
     });
+    const [v] = await this.db
+      .select({ userId: verifications.userId })
+      .from(verifications)
+      .where(eq(verifications.id, id));
+    await this.notes?.notify(v?.userId, {
+      kind: 'verification',
+      title: decision.approve ? 'ID verified' : 'ID not approved',
+      body: decision.approve
+        ? 'Your ID has been verified. You can now use everything in SportsLink.'
+        : `${decision.reason ?? 'We could not approve your document.'} Please upload it again.`,
+      link: '/onboarding/verify',
+      refId: id,
+    });
+    return result;
   }
 
   // ---------- Venues and site visits ----------
@@ -247,7 +263,7 @@ export class AdminService {
    * owner's CNIC is approved. Failing sends the venue back to draft with the notes.
    */
   async recordVisit(branchId: string, input: { passed: boolean; notes: string }, actor: Actor, now = new Date()) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [branch] = await tx
         .select({
           status: branches.status,
@@ -297,6 +313,12 @@ export class AdminService {
       });
       return { id: branchId, status };
     });
+    await this.notifyVendorOfBranch(
+      branchId,
+      input.passed ? 'Your venue is live' : 'Site visit not passed',
+      input.passed ? 'Players can now find and book your venue.' : `${input.notes} Fix this and submit again.`,
+    );
+    return result;
   }
 
   /** Suspend, ban, hide or restore a venue (spec 6 admin areas). */
@@ -306,7 +328,7 @@ export class AdminService {
     reason: string,
     actor: Actor,
   ) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [b] = await tx.select({ status: branches.status }).from(branches).where(eq(branches.id, branchId));
       if (!b) throw new AdminError('NOT_FOUND', 'Venue not found.');
       await tx.update(branches).set({ status, updatedAt: new Date() }).where(eq(branches.id, branchId));
@@ -328,6 +350,12 @@ export class AdminService {
       });
       return { id: branchId, status };
     });
+    await this.notifyVendorOfBranch(
+      branchId,
+      status === 'live' ? 'Your venue is live again' : `Your venue is ${status}`,
+      reason,
+    );
+    return result;
   }
 
   /** Commission or monthly plan per vendor (Foundation 7). */
@@ -405,7 +433,7 @@ export class AdminService {
 
   /** Approving a replacement retires the account it replaces; until then the old one stays in use. */
   async decideAccount(id: string, approve: boolean, actor: Actor, now = new Date()) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [a] = await tx.select().from(paymentAccounts).where(eq(paymentAccounts.id, id)).for('update');
       if (!a) throw new AdminError('NOT_FOUND', 'Account not found.');
       if (a.status !== 'pending') throw new AdminError('NOT_PENDING', 'This account was already decided.');
@@ -431,6 +459,19 @@ export class AdminService {
       });
       return { id, status };
     });
+    const [a] = await this.db
+      .select({ vendorId: paymentAccounts.vendorId })
+      .from(paymentAccounts)
+      .where(eq(paymentAccounts.id, id));
+    if (a && this.notes)
+      await this.notes.notify(await this.notes.vendorRecipients(a.vendorId, 'owner'), {
+        kind: 'vendor',
+        title: approve ? 'Payment account approved' : 'Payment account rejected',
+        body: approve ? 'Players can now pay you with this account.' : 'Check the details and add the account again.',
+        link: '/vendor',
+        refId: id,
+      });
+    return result;
   }
 
   // ---------- Users and moderation ----------
@@ -461,7 +502,7 @@ export class AdminService {
     actor: Actor,
     now = new Date(),
   ) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [u] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId)).for('update');
       if (!u) throw new AdminError('NOT_FOUND', 'User not found.');
       const status =
@@ -499,6 +540,19 @@ export class AdminService {
       });
       return { id: userId, status };
     });
+    const words = {
+      warning: 'You have received a warning',
+      suspension: 'Your account is suspended',
+      ban: 'Your account is banned',
+      reinstate: 'Your account is active again',
+    };
+    await this.notes?.notify(userId, {
+      kind: 'moderation',
+      title: words[input.action],
+      body: input.reason,
+      refId: userId,
+    });
+    return result;
   }
 
   // ---------- Reports and disputes ----------
@@ -562,6 +616,22 @@ export class AdminService {
       .from(auditLog)
       .orderBy(desc(auditLog.createdAt))
       .limit(limit);
+  }
+
+  private async notifyVendorOfBranch(branchId: string, title: string, body: string) {
+    if (!this.notes) return;
+    const [b] = await this.db
+      .select({ vendorId: branches.vendorId, name: branches.name })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    if (!b) return;
+    await this.notes.notify(await this.notes.vendorRecipients(b.vendorId, 'owner', branchId), {
+      kind: 'vendor',
+      title: `${b.name}: ${title}`,
+      body,
+      link: '/vendor',
+      refId: branchId,
+    });
   }
 
   private async openVisit(tx: Tx, branchId: string) {

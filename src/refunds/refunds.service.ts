@@ -1,9 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { bookings, bookingShares, branches, courts, matches, refunds, reports, users, vendors } from '../db/schema.js';
+import { money } from '../money.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { getSetting } from '../settings.js';
 import { vendorAccess } from '../vendors/access.js';
 
@@ -71,26 +73,64 @@ export async function refundShares(
 
 @Injectable()
 export class RefundsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
+  ) {}
 
   /** Player cancels their own booking. A hold is simply released; paid advances follow the policy. */
   async cancelByPlayer(userId: string, bookingId: string, now = new Date()) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const b = await this.lockBooking(tx, bookingId);
       if (b.createdBy !== userId || b.source !== 'app') throw new RefundError('NOT_FOUND', 'Booking not found.');
-      return this.cancel(tx, b, 'player', 'player_cancelled', false, now);
+      return {
+        ...(await this.cancel(tx, b, 'player', 'player_cancelled', false, now)),
+        vendorId: b.vendorId,
+        branchId: b.branchId,
+      };
     });
+    const { vendorId, branchId, ...out } = result;
+    if (this.notes) {
+      await this.notes.notify(await this.notes.vendorRecipients(vendorId, 'view_bookings', branchId), {
+        kind: 'booking',
+        title: 'Booking cancelled',
+        body: out.refunds
+          ? 'A player cancelled and a refund is due. Send it from Refunds.'
+          : 'A player cancelled their booking.',
+        link: out.refunds ? '/vendor/refunds' : '/vendor/calendar',
+        refId: bookingId,
+      });
+    }
+    return out;
   }
 
   /** Vendor cancels (for example rain or a closure): a full refund whatever the policy (spec 6.3, setting). */
   async cancelByVendor(userId: string, bookingId: string, reason: string, now = new Date()) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const b = await this.lockBooking(tx, bookingId);
       const { branchIds } = await vendorAccess(tx, userId, 'create_bookings');
       if (!branchIds.includes(b.branchId)) throw new RefundError('NOT_FOUND', 'Booking not found.');
       const full = await getSetting(tx, 'booking.vendor_cancel_full_refund', b.countryCode);
       return this.cancel(tx, b, 'vendor', 'vendor_cancelled', full, now, reason);
     });
+    if (this.notes) {
+      const shares = await this.db
+        .select({ userId: bookingShares.userId })
+        .from(bookingShares)
+        .where(eq(bookingShares.bookingId, bookingId));
+      const [b] = await this.db
+        .select({ createdBy: bookings.createdBy })
+        .from(bookings)
+        .where(eq(bookings.id, bookingId));
+      await this.notes.notify([b?.createdBy, ...shares.map((x) => x.userId)], {
+        kind: 'booking',
+        title: 'The venue cancelled your booking',
+        body: result.refunds ? `${reason.trim()}. Your advance will be refunded.` : reason.trim(),
+        link: '/bookings',
+        refId: bookingId,
+      });
+    }
+    return result;
   }
 
   /** Refunds the venue still has to send, for branches where the user confirms payments. */
@@ -132,6 +172,14 @@ export class RefundsService {
       .update(refunds)
       .set({ status: 'sent', vendorReference: reference.trim(), sentAt: now, updatedAt: now })
       .where(and(eq(refunds.id, refundId), inArray(refunds.status, ['due', 'disputed'])));
+    const [row] = await this.db.select({ userId: refunds.userId }).from(refunds).where(eq(refunds.id, refundId));
+    await this.notes?.notify(row?.userId, {
+      kind: 'refund',
+      title: 'Refund sent',
+      body: `${r.booking.branch} sent your refund of ${money(r.amount, r.currency)} (reference ${reference.trim()}). Confirm when it arrives.`,
+      link: '/bookings',
+      refId: refundId,
+    });
     return { id: refundId, status: 'sent' as const };
   }
 
@@ -154,7 +202,7 @@ export class RefundsService {
 
   /** Player confirms the money arrived, or raises a dispute for support (Foundation 8.4). */
   async confirm(userId: string, refundId: string, received: boolean, details: string | undefined, now = new Date()) {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const [r] = await tx
         .select()
         .from(refunds)
@@ -184,11 +232,29 @@ export class RefundsService {
       });
       return { id: refundId, status: 'disputed' as const };
     });
+    if (result.status === 'disputed' && this.notes) {
+      const [b] = await this.db
+        .select({ vendorId: branches.vendorId, branchId: branches.id })
+        .from(refunds)
+        .innerJoin(bookings, eq(bookings.id, refunds.bookingId))
+        .innerJoin(courts, eq(courts.id, bookings.courtId))
+        .innerJoin(branches, eq(branches.id, courts.branchId))
+        .where(eq(refunds.id, refundId));
+      if (b)
+        await this.notes.notify(await this.notes.vendorRecipients(b.vendorId, 'confirm_payments', b.branchId), {
+          kind: 'refund',
+          title: 'Refund disputed',
+          body: 'A player says a refund has not arrived. SportsLink support will be in touch.',
+          link: '/vendor/refunds',
+          refId: refundId,
+        });
+    }
+    return result;
   }
 
   private async lockBooking(tx: Tx, bookingId: string) {
     const [row] = await tx
-      .select({ b: bookings, branchId: courts.branchId, countryCode: vendors.countryCode })
+      .select({ b: bookings, branchId: courts.branchId, vendorId: vendors.id, countryCode: vendors.countryCode })
       .from(bookings)
       .innerJoin(courts, eq(courts.id, bookings.courtId))
       .innerJoin(branches, eq(branches.id, courts.branchId))
@@ -196,7 +262,7 @@ export class RefundsService {
       .where(eq(bookings.id, bookingId))
       .for('update', { of: [bookings] });
     if (!row) throw new RefundError('NOT_FOUND', 'Booking not found.');
-    return { ...row.b, branchId: row.branchId, countryCode: row.countryCode };
+    return { ...row.b, branchId: row.branchId, vendorId: row.vendorId, countryCode: row.countryCode };
   }
 
   private async cancel(

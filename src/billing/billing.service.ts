@@ -1,10 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
 import { audit } from '../admin/audit.js';
 import { localToInstant, toLocal } from '../bookings/pricing.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { auditLog, bookings, branches, countries, courts, invoiceLines, invoices, vendors } from '../db/schema.js';
+import { money } from '../money.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { getSetting } from '../settings.js';
 import { STORAGE, type FileStorage } from '../verification/storage.js';
 
@@ -41,6 +43,7 @@ export class BillingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(STORAGE) private readonly storage: FileStorage,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
   ) {}
 
   /** Bookings a vendor is billed for between two instants: counted, and completed (or no-show if billed). */
@@ -122,11 +125,19 @@ export class BillingService {
           })
           .onConflictDoNothing()
           .returning({ id: invoices.id });
-        if (!inv) return false;
+        if (!inv) return null;
         await tx.insert(invoiceLines).values(lines.map((l) => ({ ...l, invoiceId: inv.id })));
-        return true;
+        return inv.id;
       });
-      if (created) issued++;
+      if (created) {
+        issued++;
+        await this.notifyVendor(
+          vendor.id,
+          created,
+          'New invoice',
+          `Your invoice for ${prev.slice(0, 7)} is ${money(amount, currency)}.`,
+        );
+      }
     }
     return { issued };
   }
@@ -307,6 +318,17 @@ export class BillingService {
    * Overdue ladder (Foundation 8.5, all settings): reminder, warning (status overdue), venues hidden from search,
    * vendor blocked. Each step is logged as a system event; notifications are sent once that service exists.
    */
+  private async notifyVendor(vendorId: string, invoiceId: string, title: string, body: string) {
+    if (!this.notes) return;
+    await this.notes.notify(await this.notes.vendorRecipients(vendorId, 'owner'), {
+      kind: 'billing',
+      title,
+      body,
+      link: '/vendor/billing',
+      refId: invoiceId,
+    });
+  }
+
   async runOverdueLadder(now = new Date()) {
     const open = await this.db
       .select({ inv: invoices, vendorStatus: vendors.status, countryCode: vendors.countryCode })
@@ -333,6 +355,24 @@ export class BillingService {
           .insert(auditLog)
           .values({ actorType: 'system', action, targetType: 'invoice', targetId: inv.id, after });
         done.push(`${action}:${inv.id}`);
+        const due = money(inv.amount, inv.currency);
+        const words: Record<string, [string, string]> = {
+          'invoice.reminder': ['Invoice reminder', `Your invoice of ${due} is due. Upload proof once you have paid.`],
+          'invoice.warning': [
+            'Invoice overdue',
+            `Your invoice of ${due} is overdue. Pay soon to keep your venues listed.`,
+          ],
+          'invoice.venues_hidden': [
+            'Venues hidden',
+            `Your venues are hidden from players until the invoice of ${due} is paid.`,
+          ],
+          'invoice.vendor_blocked': [
+            'Account blocked',
+            `Your vendor account is blocked until the invoice of ${due} is paid.`,
+          ],
+        };
+        const w = words[action];
+        if (w) await this.notifyVendor(inv.vendorId, inv.id, ...w);
         return false;
       };
       if (age >= days.reminder) await logged('invoice.reminder');

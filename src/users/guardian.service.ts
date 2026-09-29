@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, gt, inArray, isNotNull, or } from 'drizzle-orm';
 import { normalisePhone } from '../auth/phone.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import {
   auditLog,
   bookings,
@@ -38,7 +39,10 @@ const CONSENT_TEXT: Record<string, string> = {
 /** Guardian consent for players under 18 (spec 5, Foundation 10.2). */
 @Injectable()
 export class GuardianService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() @Inject(NotificationsService) private readonly notes?: NotificationsService,
+  ) {}
 
   async consentText() {
     const version = await getSetting(this.db, 'minors.consent_version');
@@ -68,6 +72,14 @@ export class GuardianService {
         updatedAt: new Date(),
       })
       .where(eq(users.id, minorId));
+    const [minor] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, minorId));
+    await this.notes?.notify(guardian.id, {
+      kind: 'guardian',
+      title: 'Guardian request',
+      body: `${minor?.name ?? 'A player'} named you as their parent or guardian. Review and give consent.`,
+      link: `/family/${minorId}`,
+      refId: minorId,
+    });
     return { status: 'pending' as const };
   }
 
@@ -106,6 +118,12 @@ export class GuardianService {
         .update(users)
         .set({ guardianUserId: null, guardianConsentAt: null, guardianConsentVersion: null, updatedAt: now })
         .where(eq(users.id, minorId));
+      await this.notes?.notify(minorId, {
+        kind: 'guardian',
+        title: 'Guardian declined',
+        body: 'Your guardian declined the request. Ask them again or name someone else.',
+        link: '/',
+      });
       return { status: 'declined' as const };
     }
     const [cnic] = await this.db
@@ -141,6 +159,12 @@ export class GuardianService {
         targetId: minorId,
         after: { version },
       });
+    });
+    await this.notes?.notify(minorId, {
+      kind: 'guardian',
+      title: 'Guardian consent given',
+      body: 'Your guardian gave consent. You can now book and join matches.',
+      link: '/',
     });
     return { status: 'accepted' as const };
   }
