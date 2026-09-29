@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, gt, ilike, inArray, isNull, lt, or } from 'drizzle-orm';
 import { calculatePrice, localToInstant, slotTimes, toLocal } from '../bookings/pricing.js';
 import { DB } from '../db/db.module.js';
+import { photoUrl } from '../vendors/photos.service.js';
 import type { Db } from '../db/client.js';
 import {
   bookings,
@@ -52,6 +53,7 @@ export class VenuesService {
         city: branches.city,
         address: branches.address,
         facilities: branches.facilities,
+        photoKeys: branches.photoKeys,
         currency: countries.currency,
         sport: sports.name,
         sportSlug: sports.slug,
@@ -110,6 +112,7 @@ export class VenuesService {
         city: v.city,
         address: v.address,
         facilities: v.facilities,
+        photos: v.photoKeys.map(photoUrl),
         currency: v.currency,
         fromPricePerHour: v.fromPricePerHour,
         sports: [...v.sports].sort(),
@@ -128,6 +131,7 @@ export class VenuesService {
         address: branches.address,
         facilities: branches.facilities,
         rules: branches.rules,
+        photoKeys: branches.photoKeys,
         timezone: branches.timezone,
         currency: countries.currency,
       })
@@ -181,6 +185,7 @@ export class VenuesService {
       city: branch.city,
       address: branch.address,
       facilities: branch.facilities,
+      photos: branch.photoKeys.map(photoUrl),
       rules: branch.rules,
       timezone: branch.timezone,
       currency: branch.currency,

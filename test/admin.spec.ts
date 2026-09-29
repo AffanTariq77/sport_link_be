@@ -27,7 +27,11 @@ import { ensurePakistan, testDb } from './fixtures.js';
 const { db, pool } = testDb();
 const crypto = new DocumentCrypto(randomBytes(32).toString('base64'));
 const files = new Map<string, Buffer>();
-const storage: FileStorage = { put: async (k, d) => void files.set(k, d), get: async (k) => files.get(k)! };
+const storage: FileStorage = {
+  put: async (k, d) => void files.set(k, d),
+  get: async (k) => files.get(k)!,
+  delete: async (k) => void files.delete(k),
+};
 const auth = new AdminAuthService(db, crypto);
 const admin = new AdminService(db, storage, crypto);
 afterAll(() => pool.end());

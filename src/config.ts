@@ -16,9 +16,12 @@ const Env = z
     // Master key for CNIC and B-Form data (base64, 32 bytes). Separate keys for numbers, images and the
     // duplicate-check hash are derived from it. Generate with: openssl rand -base64 32
     DOCUMENT_KEY: z.base64().refine((k) => Buffer.from(k, 'base64').length === 32, 'DOCUMENT_KEY must be 32 bytes'),
-    // Where uploaded documents are stored. 'local' is a folder for development; S3 is added once hosting is chosen.
-    STORAGE_DRIVER: z.enum(['local']).default('local'),
+    // Where uploads are stored. 'local' is a folder for development; 's3' any private S3-compatible bucket.
+    STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
     STORAGE_DIR: z.string().default('.storage'),
+    S3_BUCKET: z.string().optional(),
+    S3_REGION: z.string().default('ap-south-1'),
+    S3_ENDPOINT: z.url().optional(), // only for S3-compatible services such as R2 or MinIO
     // Phone push notifications. 'log' prints them to the API log (development); 'expo' sends them for real.
     PUSH_PROVIDER: z.enum(['log', 'expo']).default('log'),
     EXPO_ACCESS_TOKEN: z.string().optional(),
@@ -31,6 +34,10 @@ const Env = z
   .refine((e) => !(e.NODE_ENV === 'production' && e.PUSH_PROVIDER === 'log'), {
     message: 'PUSH_PROVIDER=log is not allowed in production',
     path: ['PUSH_PROVIDER'],
+  })
+  .refine((e) => e.STORAGE_DRIVER !== 's3' || !!e.S3_BUCKET, {
+    message: 'S3_BUCKET is required when STORAGE_DRIVER=s3',
+    path: ['S3_BUCKET'],
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.STORAGE_DRIVER === 'local'), {
     message: 'STORAGE_DRIVER=local is not allowed in production',

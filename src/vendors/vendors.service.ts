@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { calculatePrice, localToInstant, slotTimes } from '../bookings/pricing.js';
 import { DB } from '../db/db.module.js';
+import { photoUrl } from './photos.service.js';
 import type { Db } from '../db/client.js';
 import {
   bookings,
@@ -38,7 +39,9 @@ export class VendorError extends Error {
       | 'HAS_FUTURE_BOOKINGS'
       | 'INCOMPLETE'
       | 'ALREADY_SUBMITTED'
-      | 'INVALID_ACCOUNT',
+      | 'INVALID_ACCOUNT'
+      | 'TOO_MANY_PHOTOS'
+      | 'INVALID_IMAGE',
     message: string,
   ) {
     super(message);
@@ -130,7 +133,10 @@ export class VendorsService {
     const out = [];
     for (const b of branchRows) {
       const detail = await this.branchDetail(b.id);
-      out.push({ ...detail, checklist: await this.checklist(b.id, vendor.id, vendor.countryCode, now) });
+      out.push({
+        ...detail,
+        checklist: await this.checklist(b.id, vendor.id, vendor.countryCode, now),
+      });
     }
     return { vendor, branches: out, paymentAccounts: accounts };
   }
@@ -396,6 +402,7 @@ export class VendorsService {
       latitude: b!.latitude,
       longitude: b!.longitude,
       facilities: b!.facilities,
+      photos: b!.photoKeys.map(photoUrl),
       rules: b!.rules,
       timezone: b!.timezone,
       status: b!.status,

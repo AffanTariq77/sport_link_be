@@ -8,7 +8,11 @@ import { at, createVenue, NOW, testDb } from './fixtures.js';
 
 const { db, pool } = testDb();
 const files = new Map<string, Buffer>();
-const storage: FileStorage = { put: async (k, d) => void files.set(k, d), get: async (k) => files.get(k)! };
+const storage: FileStorage = {
+  put: async (k, d) => void files.set(k, d),
+  get: async (k) => files.get(k)!,
+  delete: async (k) => void files.delete(k),
+};
 const billing = new BillingService(db, storage);
 const engine = new BookingsService(db);
 afterAll(() => pool.end());

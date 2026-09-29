@@ -22,6 +22,8 @@ const VENDOR_STATUS: Record<VendorError['code'], number> = {
   INCOMPLETE: 409,
   ALREADY_SUBMITTED: 409,
   INVALID_ACCOUNT: 400,
+  TOO_MANY_PHOTOS: 409,
+  INVALID_IMAGE: 400,
 };
 const BOOKING_STATUS: Record<BookingError['code'], number> = {
   SLOT_TAKEN: 409,

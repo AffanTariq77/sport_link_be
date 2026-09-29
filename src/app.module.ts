@@ -32,11 +32,12 @@ import { MeController } from './users/me.controller.js';
 import { CalendarController } from './vendors/calendar.controller.js';
 import { CalendarService } from './vendors/calendar.service.js';
 import { StaffService } from './vendors/staff.service.js';
-import { VendorsController } from './vendors/vendors.controller.js';
+import { PhotosService } from './vendors/photos.service.js';
+import { VendorsController, VenuePhotosController } from './vendors/vendors.controller.js';
 import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
 import { DocumentCrypto } from './verification/document-crypto.js';
-import { LocalDiskStorage, STORAGE } from './verification/storage.js';
+import { LocalDiskStorage, S3Storage, STORAGE } from './verification/storage.js';
 import { VerificationService } from './verification/verification.service.js';
 import { VenuesController } from './venues/venues.controller.js';
 import { VenuesService } from './venues/venues.service.js';
@@ -54,6 +55,7 @@ import { HealthController } from './health/health.controller.js';
     BookingsController,
     PaymentsController,
     VendorsController,
+    VenuePhotosController,
     CalendarController,
     MatchesController,
     ChatController,
@@ -70,6 +72,7 @@ import { HealthController } from './health/health.controller.js';
     VenuesService,
     PaymentsService,
     VendorsService,
+    PhotosService,
     CalendarService,
     MatchesService,
     ChatService,
@@ -98,8 +101,16 @@ import { HealthController } from './health/health.controller.js';
     GuardianService,
     VerificationService,
     { provide: DocumentCrypto, useFactory: () => new DocumentCrypto(loadEnv().DOCUMENT_KEY) },
-    // STORAGE_DRIVER only allows 'local' until S3 is added; config refuses it in production.
-    { provide: STORAGE, useFactory: () => new LocalDiskStorage(loadEnv().STORAGE_DIR) },
+    // Config refuses the local folder in production.
+    {
+      provide: STORAGE,
+      useFactory: () => {
+        const env = loadEnv();
+        return env.STORAGE_DRIVER === 's3'
+          ? new S3Storage(env.S3_BUCKET!, { region: env.S3_REGION, endpoint: env.S3_ENDPOINT })
+          : new LocalDiskStorage(env.STORAGE_DIR);
+      },
+    },
   ],
 })
 export class AppModule {}

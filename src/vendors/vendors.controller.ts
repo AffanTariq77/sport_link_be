@@ -1,10 +1,29 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiDefaultResponse, ApiOkResponse } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Req,
+  Res,
+  StreamableFile,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiDefaultResponse, ApiOkResponse, ApiProduces } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError, withErrors } from '../api-error.js';
 import { AuthGuard, type AuthedRequest } from '../auth/auth.guard.js';
 import { UnlockedGuard } from '../auth/unlocked.guard.js';
 import { advanceType, dayType, listingStatus, paymentMethod, reviewStatus, vendorStatus } from '../db/schema.js';
+import { PhotosService } from './photos.service.js';
 import { VendorError, VendorsService } from './vendors.service.js';
 
 const STATUS: Record<VendorError['code'], number> = {
@@ -19,6 +38,8 @@ const STATUS: Record<VendorError['code'], number> = {
   INCOMPLETE: 409,
   ALREADY_SUBMITTED: 409,
   INVALID_ACCOUNT: 400,
+  TOO_MANY_PHOTOS: 409,
+  INVALID_IMAGE: 400,
 };
 const run = <T>(fn: () => Promise<T>) => withErrors(VendorError, STATUS, fn);
 
@@ -130,6 +151,7 @@ const Setup = z
         latitude: z.number(),
         longitude: z.number(),
         facilities: z.array(z.string()),
+        photos: z.array(z.string()),
         rules: z.string().nullable(),
         timezone: z.string(),
         status: z.enum(listingStatus.enumValues),
@@ -180,7 +202,39 @@ const Submitted = z.object({ id: z.uuid(), status: z.enum(listingStatus.enumValu
 @ApiBearerAuth()
 @ApiDefaultResponse({ description: 'Error', standardSchema: ApiError })
 export class VendorsController {
-  constructor(@Inject(VendorsService) private readonly vendors: VendorsService) {}
+  constructor(
+    @Inject(VendorsService) private readonly vendors: VendorsService,
+    @Inject(PhotosService) private readonly photos: PhotosService,
+  ) {}
+
+  @Post('branches/:id/photos')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('photo', { limits: { fileSize: 11_000_000, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: { type: 'object', required: ['photo'], properties: { photo: { type: 'string', format: 'binary' } } },
+  })
+  @ApiOkResponse({ standardSchema: z.object({ url: z.string() }).meta({ id: 'VenuePhoto' }) })
+  addPhoto(
+    @Req() req: AuthedRequest,
+    @Param('id', { schema: Id }) id: string,
+    @UploadedFile() file: { buffer: Buffer; size: number } | undefined,
+  ) {
+    return run(async () => {
+      if (!file) throw new VendorError('INVALID_IMAGE', 'Choose a photo to upload.');
+      return this.photos.add(req.auth.user.id, id, file);
+    });
+  }
+
+  @Delete('branches/:id/photos/:photoId')
+  @ApiOkResponse({ standardSchema: z.object({ ok: z.boolean() }) })
+  removePhoto(
+    @Req() req: AuthedRequest,
+    @Param('id', { schema: Id }) id: string,
+    @Param('photoId', { schema: Id }) photoId: string,
+  ) {
+    return run(() => this.photos.remove(req.auth.user.id, id, photoId));
+  }
 
   @Get('setup')
   @ApiOkResponse({ standardSchema: Setup })
@@ -276,5 +330,24 @@ export class VendorsController {
   @ApiOkResponse({ standardSchema: Account })
   addAccount(@Req() req: AuthedRequest, @Body({ schema: AccountBody }) body: z.infer<typeof AccountBody>) {
     return run(() => this.vendors.addAccount(req.auth.user.id, body));
+  }
+}
+
+/** Venue photos are public (spec 2: served via CDN). Ids are random and immutable, so they cache for a long time. */
+@Controller('venues')
+@ApiDefaultResponse({ description: 'Error', standardSchema: ApiError })
+export class VenuePhotosController {
+  constructor(@Inject(PhotosService) private readonly photos: PhotosService) {}
+
+  @Get(':id/photos/:photoId')
+  @ApiProduces('image/jpeg', 'image/png', 'image/webp')
+  async photo(
+    @Param('id', { schema: Id }) id: string,
+    @Param('photoId', { schema: Id }) photoId: string,
+    @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void },
+  ) {
+    const { image, contentType } = await run(() => this.photos.get(id, photoId));
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); // success only: a 404 must not stick
+    return new StreamableFile(image, { type: contentType });
   }
 }

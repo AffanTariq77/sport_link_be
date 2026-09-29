@@ -13,6 +13,7 @@ const stored = new Map<string, Buffer>();
 const storage: FileStorage = {
   put: async (key, data) => void stored.set(key, data),
   get: async (key) => stored.get(key)!,
+  delete: async (key) => void stored.delete(key),
 };
 const crypto = new DocumentCrypto(randomBytes(32).toString('base64'));
 const profiles = new ProfileService(db);

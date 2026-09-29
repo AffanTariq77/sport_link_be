@@ -16,6 +16,7 @@ const VenueSummary = z
     city: z.string(),
     address: z.string(),
     facilities: z.array(z.string()),
+    photos: z.array(z.string()).meta({ description: 'Photo paths on this API, first is the cover' }),
     sports: z.array(z.string()),
     courtCount: z.int(),
     currency: z.string(),
