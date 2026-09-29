@@ -16,6 +16,7 @@ export const ADMIN_PERMISSIONS = [
   'audit.view',
   'settings.manage',
   'analytics.view',
+  'tournaments.manage',
 ] as const;
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
 
@@ -70,6 +71,12 @@ export const DEFAULTS = {
   'find.chat_hours_after_close': 24,
   // Foundation 10.2: minors and adults do not see each other in Find Players unless the guardian allows it.
   'minors.find_players_separate': true,
+  // Tournaments (spec 12.2). OPEN: whether entry fees go to SportsLink or the host venue; the tournament's pay_to
+  // text tells entrants where to pay either way.
+  'tournament.fee_payee': 'venue' as 'venue' | 'sportslink',
+  'tournament.points_win': 3,
+  'tournament.points_draw': 1,
+  'tournament.group_advance': 2, // per group into the knockout
   // Results (spec 11.1). OPEN: whether silence after the window counts as confirmed.
   'result.confirm_hours': 48,
   'result.silence_confirms': true,
@@ -103,6 +110,7 @@ export const DEFAULTS = {
     owner: [...ADMIN_PERMISSIONS],
     super_admin: [...ADMIN_PERMISSIONS], // except managing owners, enforced where admins are managed
     operations: [
+      'tournaments.manage',
       'venues.approve',
       'venues.ban',
       'payment_accounts.approve',

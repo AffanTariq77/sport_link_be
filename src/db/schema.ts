@@ -759,6 +759,104 @@ export const findResponses = pgTable(
   ],
 );
 
+// ---------- Tournaments (spec 12.2, admin only) ----------
+export const tournamentFormat = pgEnum('tournament_format', ['knockout', 'league', 'round_robin', 'groups_knockout']);
+export const tournamentStatus = pgEnum('tournament_status', [
+  'draft',
+  'open', // taking entries
+  'closed', // registration closed, waiting for the draw
+  'in_progress',
+  'completed',
+  'cancelled',
+]);
+export const entryStatus = pgEnum('entry_status', [
+  'pending_payment',
+  'submitted',
+  'confirmed',
+  'rejected',
+  'withdrawn',
+]);
+export const fixtureStatus = pgEnum('fixture_status', ['scheduled', 'completed', 'walkover', 'bye']);
+
+export const tournaments = pgTable('tournaments', {
+  id: id(),
+  sportId: uuid('sport_id')
+    .notNull()
+    .references(() => sports.id),
+  name: text('name').notNull(),
+  format: tournamentFormat('format').notNull(),
+  teamEntry: boolean('team_entry').notNull().default(false),
+  entryFee: money('entry_fee').notNull().default(0),
+  currency: text('currency').notNull(),
+  prize: text('prize'),
+  venue: text('venue').notNull(),
+  startsAt: ts('starts_at').notNull(),
+  endsAt: ts('ends_at').notNull(),
+  registrationDeadline: ts('registration_deadline').notNull(),
+  maxEntries: smallint('max_entries').notNull(),
+  groupSize: smallint('group_size').notNull().default(4),
+  eligibility: jsonb('eligibility').notNull().default({}), // rating range, age range, gender
+  payTo: text('pay_to'), // where entrants send the fee (OPEN: SportsLink or the host venue)
+  programme: text('programme'), // null, or a future programme such as government trials (spec 12.2)
+  status: tournamentStatus('status').notNull().default('open'),
+  createdBy: uuid('created_by').notNull(), // admin user
+  ...timestamps,
+});
+
+export const tournamentEntries = pgTable(
+  'tournament_entries',
+  {
+    id: id(),
+    tournamentId: uuid('tournament_id')
+      .notNull()
+      .references(() => tournaments.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id), // the player, or the captain who registered the team
+    teamId: uuid('team_id').references(() => teams.id),
+    status: entryStatus('status').notNull(),
+    method: paymentMethod('method'),
+    txnReference: text('txn_reference'),
+    seed: smallint('seed'),
+    groupNo: smallint('group_no'),
+    rosterUnlocked: boolean('roster_unlocked').notNull().default(false), // admin approves roster changes
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex('tournament_entries_player_uq')
+      .on(t.tournamentId, t.userId)
+      .where(sql`team_id is null and status <> 'withdrawn' and status <> 'rejected'`),
+    uniqueIndex('tournament_entries_team_uq')
+      .on(t.tournamentId, t.teamId)
+      .where(sql`team_id is not null and status <> 'withdrawn' and status <> 'rejected'`),
+    uniqueIndex('tournament_entries_txn_uq').on(t.tournamentId, t.txnReference),
+  ],
+);
+
+export const tournamentFixtures = pgTable(
+  'tournament_fixtures',
+  {
+    id: id(),
+    tournamentId: uuid('tournament_id')
+      .notNull()
+      .references(() => tournaments.id),
+    stage: text('stage').notNull(), // group | league | knockout
+    round: smallint('round').notNull(),
+    slot: smallint('slot').notNull(),
+    groupNo: smallint('group_no'),
+    entryA: uuid('entry_a').references(() => tournamentEntries.id),
+    entryB: uuid('entry_b').references(() => tournamentEntries.id),
+    scoreA: smallint('score_a'),
+    scoreB: smallint('score_b'),
+    winnerEntryId: uuid('winner_entry_id').references(() => tournamentEntries.id),
+    status: fixtureStatus('status').notNull().default('scheduled'),
+    scheduledAt: ts('scheduled_at'),
+    ratedAt: ts('rated_at'),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('tournament_fixtures_slot_uq').on(t.tournamentId, t.stage, t.round, t.groupNo, t.slot)],
+);
+
 // ---------- Results, ratings and reviews (spec 11) ----------
 export const resultStatus = pgEnum('result_status', ['pending', 'confirmed', 'disputed', 'voided']);
 export const resultOutcome = pgEnum('result_outcome', ['a', 'b', 'draw']);

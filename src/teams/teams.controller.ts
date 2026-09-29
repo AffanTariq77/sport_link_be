@@ -15,6 +15,7 @@ const STATUS: Record<TeamError['code'], number> = {
   ALREADY_MEMBER: 409,
   NOT_INVITED: 409,
   CAPTAIN_LEAVING: 409,
+  ROSTER_LOCKED: 409,
 };
 const run = <T>(fn: () => Promise<T>) => withErrors(TeamError, STATUS, fn);
 

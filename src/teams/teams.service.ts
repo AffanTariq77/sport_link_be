@@ -1,10 +1,21 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, asc, desc, eq, ilike, inArray, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, lt, ne, notInArray, or } from 'drizzle-orm';
 import { audit } from '../admin/audit.js';
 import { normalisePhone } from '../auth/phone.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
-import { matchResults, matches, reports, sports, teamMembers, teamRatings, teams, users } from '../db/schema.js';
+import {
+  matchResults,
+  matches,
+  reports,
+  sports,
+  teamMembers,
+  teamRatings,
+  teams,
+  tournamentEntries,
+  tournaments,
+  users,
+} from '../db/schema.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { tierFor } from '../ratings/players.service.js';
 import { getSetting } from '../settings.js';
@@ -12,7 +23,13 @@ import { getSetting } from '../settings.js';
 export class TeamError extends Error {
   constructor(
     public readonly code:
-      'NOT_FOUND' | 'NOT_CAPTAIN' | 'INVALID_TEAM' | 'ALREADY_MEMBER' | 'NOT_INVITED' | 'CAPTAIN_LEAVING',
+      | 'NOT_FOUND'
+      | 'NOT_CAPTAIN'
+      | 'INVALID_TEAM'
+      | 'ALREADY_MEMBER'
+      | 'NOT_INVITED'
+      | 'CAPTAIN_LEAVING'
+      | 'ROSTER_LOCKED',
     message: string,
   ) {
     super(message);
@@ -238,6 +255,7 @@ export class TeamsService {
     if (!active.some((m) => m.userId === userId)) throw new TeamError('NOT_FOUND', 'You are not in this team.');
     if (t.captainId === userId && active.length > 1)
       throw new TeamError('CAPTAIN_LEAVING', 'Make someone else captain before you leave.');
+    await this.assertRosterOpen(teamId);
     await this.db.transaction(async (tx) => {
       await tx
         .update(teamMembers)
@@ -267,6 +285,7 @@ export class TeamsService {
     if (!m) throw new TeamError('NOT_FOUND', 'Member not found.');
     if (m.role === 'vice_captain' && t.captainId !== userId)
       throw new TeamError('NOT_CAPTAIN', 'Only the captain can remove the vice captain.');
+    await this.assertRosterOpen(teamId);
     await this.db
       .update(teamMembers)
       .set({ status: 'removed', role: 'member', updatedAt: new Date() })
@@ -368,6 +387,29 @@ export class TeamsService {
   }
 
   // ---------- helpers ----------
+
+  /** In a tournament whose registration has closed the roster is locked, unless an admin allowed changes (12.1). */
+  private async assertRosterOpen(teamId: string, now = new Date()) {
+    const [locked] = await this.db
+      .select({ id: tournamentEntries.id })
+      .from(tournamentEntries)
+      .innerJoin(tournaments, eq(tournaments.id, tournamentEntries.tournamentId))
+      .where(
+        and(
+          eq(tournamentEntries.teamId, teamId),
+          inArray(tournamentEntries.status, ['pending_payment', 'submitted', 'confirmed']),
+          eq(tournamentEntries.rosterUnlocked, false),
+          lt(tournaments.registrationDeadline, now),
+          notInArray(tournaments.status, ['completed', 'cancelled']),
+        ),
+      )
+      .limit(1);
+    if (locked)
+      throw new TeamError(
+        'ROSTER_LOCKED',
+        'The team is in a tournament, so the roster is locked. Ask SportsLink support.',
+      );
+  }
 
   private async handOver(
     tx: Pick<Db, 'update'>,
