@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { effectiveStatus } from '../bookings/bookings.service.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
@@ -18,6 +18,8 @@ import {
   ratings,
   reports,
   sports,
+  teamMembers,
+  teams,
   users,
   verifications,
 } from '../db/schema.js';
@@ -130,6 +132,9 @@ export class MatchesService {
       slotsTotal: number;
       hostBrings: number;
       filters: MatchFilters;
+      /** Team match: the host's team (captain or vice captain), and optionally the team challenged. */
+      teamId?: string;
+      opponentTeamId?: string;
     },
     now = new Date(),
   ) {
@@ -147,6 +152,18 @@ export class MatchesService {
     }
     const [sport] = await this.db.select({ id: sports.id }).from(sports).where(eq(sports.slug, input.sport));
     if (!sport) throw new MatchError('INVALID_MATCH', 'Choose a sport from the list.');
+    if (input.teamId) {
+      const home = await this.teamFor(input.teamId, sport.id);
+      if (!(await this.leads(userId, input.teamId)) || !home)
+        throw new MatchError('INVALID_MATCH', 'Only the captain or vice captain can create a match for this team.');
+      if (
+        input.opponentTeamId &&
+        (input.opponentTeamId === input.teamId || !(await this.teamFor(input.opponentTeamId, sport.id)))
+      )
+        throw new MatchError('INVALID_MATCH', 'Choose another team of the same sport to challenge.');
+    } else if (input.opponentTeamId) {
+      throw new MatchError('INVALID_MATCH', 'Choose your team first.');
+    }
 
     let place: { bookingId: string | null; startAt: Date; endAt: Date; unlisted: typeof input.unlisted | null };
     if (input.bookingId) {
@@ -196,8 +213,32 @@ export class MatchesService {
           hostBrings: input.hostBrings,
           filters: input.filters,
           joinCutoffAt: new Date(place.startAt.getTime() - cutoffMinutes * 60_000),
+          homeTeamId: input.teamId ?? null,
+          challengedTeamId: input.opponentTeamId ?? null,
         })
         .returning({ id: matches.id });
+      if (input.opponentTeamId) {
+        const leaders = await this.db
+          .select({ id: teamMembers.userId })
+          .from(teamMembers)
+          .where(
+            and(
+              eq(teamMembers.teamId, input.opponentTeamId),
+              eq(teamMembers.status, 'active'),
+              inArray(teamMembers.role, ['captain', 'vice_captain']),
+            ),
+          );
+        await this.notes?.notify(
+          leaders.map((l) => l.id),
+          {
+            kind: 'match',
+            title: 'Your team is challenged',
+            body: 'Another team wants to play you. Open the match to accept.',
+            link: `/matches/${m!.id}`,
+            refId: m!.id,
+          },
+        );
+      }
       return { id: m!.id };
     } catch (err) {
       if (hasPgCode(err, UNIQUE_VIOLATION))
@@ -288,6 +329,20 @@ export class MatchesService {
       .where(and(eq(blocks.blockerId, m.hostId), eq(blocks.blockedId, userId)));
     if (blocked || !eligible(await this.viewer(userId), m.filters as MatchFilters, m.startAt, m.sportId)) {
       throw new MatchError('NOT_ELIGIBLE', 'This match is not open to you.');
+    }
+    if (m.homeTeamId) {
+      const teamsInMatch = [m.homeTeamId, m.awayTeamId].filter((x): x is string => !!x);
+      const [member] = await this.db
+        .select({ teamId: teamMembers.teamId })
+        .from(teamMembers)
+        .where(
+          and(
+            eq(teamMembers.userId, userId),
+            eq(teamMembers.status, 'active'),
+            inArray(teamMembers.teamId, teamsInMatch),
+          ),
+        );
+      if (!member) throw new MatchError('NOT_ELIGIBLE', 'Only players from the two teams can join this match.');
     }
     await this.assertNoOverlap(userId, m.startAt, m.endAt, matchId);
     await this.db
@@ -562,6 +617,9 @@ export class MatchesService {
         filters: matches.filters,
         sport: sports.name,
         sportId: matches.sportId,
+        homeTeamId: matches.homeTeamId,
+        awayTeamId: matches.awayTeamId,
+        challengedTeamId: matches.challengedTeamId,
         host: { id: users.id, name: users.name },
         bookingId: matches.bookingId,
         unlistedVenueName: matches.unlistedVenueName,
@@ -590,9 +648,19 @@ export class MatchesService {
           .where(and(inArray(matchPlayers.matchId, ids), inArray(matchPlayers.status, [...TAKING_PLACE])))
           .groupBy(matchPlayers.matchId)
       : [];
+    const teamIds = [...new Set(rows.flatMap((r) => [r.homeTeamId, r.awayTeamId, r.challengedTeamId]))].filter(
+      (x): x is string => !!x,
+    );
+    const teamNames = teamIds.length
+      ? await this.db.select({ id: teams.id, name: teams.name }).from(teams).where(inArray(teams.id, teamIds))
+      : [];
+    const team = (tid: string | null) => (tid ? (teamNames.find((t) => t.id === tid) ?? null) : null);
     return rows.map((r) => ({
       id: r.id,
       status: r.status,
+      teams: r.homeTeamId
+        ? { home: team(r.homeTeamId), away: team(r.awayTeamId), challenged: team(r.challengedTeamId) }
+        : null,
       sport: r.sport,
       sportId: r.sportId,
       startAt: r.startAt,
@@ -612,6 +680,54 @@ export class MatchesService {
       pricePerPlayer: r.total !== null ? Math.ceil(r.total / r.slotsTotal) : null,
       currency: r.currency,
     }));
+  }
+
+  /** A team takes up the challenge: an open team match, or one that named this team (spec 12.1). */
+  async acceptChallenge(userId: string, matchId: string, teamId: string, now = new Date()) {
+    const m = await this.getOpen(matchId, now);
+    if (!m.homeTeamId || m.awayTeamId) throw new MatchError('CLOSED', 'This match is not looking for a team.');
+    if (m.homeTeamId === teamId || (m.challengedTeamId && m.challengedTeamId !== teamId))
+      throw new MatchError('NOT_ELIGIBLE', 'This challenge is for another team.');
+    if (!(await this.leads(userId, teamId)) || !(await this.teamFor(teamId, m.sportId)))
+      throw new MatchError('NOT_ELIGIBLE', 'Only the captain or vice captain of a team in this sport can accept.');
+    const [done] = await this.db
+      .update(matches)
+      .set({ awayTeamId: teamId, updatedAt: now })
+      .where(and(eq(matches.id, matchId), isNull(matches.awayTeamId)))
+      .returning({ id: matches.id });
+    if (!done) throw new MatchError('CLOSED', 'Another team has already accepted.');
+    const { text } = await this.label(matchId);
+    await this.notes?.notify(m.hostId, {
+      kind: 'match',
+      title: 'Challenge accepted',
+      body: `A team accepted your challenge for ${text}.`,
+      link: `/matches/${matchId}`,
+      refId: matchId,
+    });
+    return { id: matchId, awayTeamId: teamId };
+  }
+
+  private async leads(userId: string, teamId: string) {
+    const [m] = await this.db
+      .select({ role: teamMembers.role })
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.teamId, teamId),
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.status, 'active'),
+          inArray(teamMembers.role, ['captain', 'vice_captain']),
+        ),
+      );
+    return !!m;
+  }
+
+  private async teamFor(teamId: string, sportId: string) {
+    const [t] = await this.db
+      .select({ id: teams.id })
+      .from(teams)
+      .where(and(eq(teams.id, teamId), eq(teams.sportId, sportId), eq(teams.status, 'active')));
+    return t ?? null;
   }
 
   private async viewer(userId: string): Promise<Viewer> {

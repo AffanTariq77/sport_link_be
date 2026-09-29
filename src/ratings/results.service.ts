@@ -4,7 +4,18 @@ import { audit } from '../admin/audit.js';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
 import { hasPgCode } from '../db/errors.js';
-import { matches, matchPlayers, matchResults, ratingChanges, ratings, reports, reviews, users } from '../db/schema.js';
+import {
+  matches,
+  matchPlayers,
+  matchResults,
+  ratingChanges,
+  ratings,
+  reports,
+  reviews,
+  teamMembers,
+  teamRatings,
+  users,
+} from '../db/schema.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { getSetting } from '../settings.js';
 import { composite, type Glicko, idle, rate } from './glicko.js';
@@ -108,6 +119,17 @@ export class ResultsService {
       !all.every((id) => players.includes(id))
     ) {
       throw new ResultError('INVALID_SIDES', 'Put every player on one side, with at least one player on each side.');
+    }
+    if (m.homeTeamId) {
+      // Team match: side A is the home team, side B the away team (spec 12.1).
+      if (!m.awayTeamId) throw new ResultError('NOT_FINISHED', 'No team accepted this challenge.');
+      const members = await this.db
+        .select({ userId: teamMembers.userId, teamId: teamMembers.teamId })
+        .from(teamMembers)
+        .where(and(inArray(teamMembers.teamId, [m.homeTeamId, m.awayTeamId]), eq(teamMembers.status, 'active')));
+      const on = (teamId: string) => (id: string) => members.some((x) => x.userId === id && x.teamId === teamId);
+      if (!input.sideA.every(on(m.homeTeamId)) || !input.sideB.every(on(m.awayTeamId)))
+        throw new ResultError('INVALID_SIDES', 'Side A is the home team and side B the away team.');
     }
     const hours = await getSetting(this.db, 'result.confirm_hours');
     const confirmBy = new Date(now.getTime() + hours * 3_600_000);
@@ -329,7 +351,12 @@ export class ResultsService {
   /** Glicko-2, one game per rating period, each player against the other side's composite (spec 11.2, 11.3). */
   private async applyRatings(tx: Tx, resultId: string, now: Date) {
     const [r] = await tx
-      .select({ result: matchResults, sportId: matches.sportId })
+      .select({
+        result: matchResults,
+        sportId: matches.sportId,
+        homeTeamId: matches.homeTeamId,
+        awayTeamId: matches.awayTeamId,
+      })
       .from(matchResults)
       .innerJoin(matches, eq(matches.id, matchResults.matchId))
       .where(eq(matchResults.id, resultId));
@@ -410,8 +437,66 @@ export class ResultsService {
         .where(eq(ratings.id, row.id));
       await tx.insert(ratingChanges).values({ resultId, userId, sportId: r.sportId, before, after });
     }
-    await tx.update(matchResults).set({ ratedAt: now }).where(eq(matchResults.id, resultId));
+    let teamChanges: { teamId: string; before: Snapshot; after: Snapshot }[] | null = null;
+    if (r.homeTeamId && r.awayTeamId)
+      teamChanges = await this.rateTeams(tx, r.homeTeamId, r.awayTeamId, outcome, cfg, now);
+    await tx.update(matchResults).set({ ratedAt: now, teamChanges }).where(eq(matchResults.id, resultId));
     await tx.update(matches).set({ status: 'completed', updatedAt: now }).where(eq(matches.id, matchId));
+  }
+
+  /** Team entities get their own rating, updated the normal way: home against away (spec 11.3). */
+  private async rateTeams(
+    tx: Tx,
+    homeId: string,
+    awayId: string,
+    outcome: Outcome,
+    cfg: { start: number; deviation: number; volatility: number; tau: number; periodDays: number },
+    now: Date,
+  ) {
+    await tx
+      .insert(teamRatings)
+      .values(
+        [homeId, awayId].map((teamId) => ({
+          teamId,
+          rating: cfg.start,
+          deviation: cfg.deviation,
+          volatility: cfg.volatility,
+        })),
+      )
+      .onConflictDoNothing();
+    const rows = await tx
+      .select()
+      .from(teamRatings)
+      .where(inArray(teamRatings.teamId, [homeId, awayId]))
+      .for('update');
+    const periodMs = cfg.periodDays * 86_400_000;
+    const pre = (teamId: string) => {
+      const row = rows.find((x) => x.teamId === teamId)!;
+      const periods = row.lastPlayedAt ? Math.floor((now.getTime() - row.lastPlayedAt.getTime()) / periodMs) : 0;
+      return { row, g: idle(row, periods, cfg.deviation) };
+    };
+    const [home, away] = [pre(homeId), pre(awayId)];
+    const out = [];
+    for (const [me, them, score] of [
+      [home, away, outcome === 'draw' ? 0.5 : outcome === 'a' ? 1 : 0],
+      [away, home, outcome === 'draw' ? 0.5 : outcome === 'b' ? 1 : 0],
+    ] as const) {
+      const next = rate(me.g, them.g, score, cfg.tau);
+      const before: Snapshot = {
+        rating: me.row.rating,
+        deviation: me.row.deviation,
+        volatility: me.row.volatility,
+        games: me.row.games,
+        lastPlayedAt: me.row.lastPlayedAt?.toISOString() ?? null,
+      };
+      const after: Snapshot = { ...next, games: me.row.games + 1, lastPlayedAt: now.toISOString() };
+      await tx
+        .update(teamRatings)
+        .set({ ...next, games: after.games, lastPlayedAt: now, updatedAt: now })
+        .where(eq(teamRatings.teamId, me.row.teamId));
+      out.push({ teamId: me.row.teamId, before, after });
+    }
+    return out;
   }
 
   /**
@@ -462,13 +547,45 @@ export class ResultsService {
       }
       await tx.update(ratingChanges).set({ revertedAt: new Date() }).where(eq(ratingChanges.id, c.id));
     }
+    const [row] = await tx
+      .select({ teamChanges: matchResults.teamChanges })
+      .from(matchResults)
+      .where(eq(matchResults.id, resultId));
+    for (const t of (row?.teamChanges ?? []) as { teamId: string; before: Snapshot; after: Snapshot }[]) {
+      const [current] = await tx.select().from(teamRatings).where(eq(teamRatings.teamId, t.teamId));
+      const latest = current?.lastPlayedAt?.toISOString() === t.after.lastPlayedAt;
+      await tx
+        .update(teamRatings)
+        .set(
+          latest
+            ? {
+                rating: t.before.rating,
+                deviation: t.before.deviation,
+                volatility: t.before.volatility,
+                games: t.before.games,
+                lastPlayedAt: t.before.lastPlayedAt ? new Date(t.before.lastPlayedAt) : null,
+              }
+            : {
+                rating: sql`${teamRatings.rating} - ${t.after.rating - t.before.rating}`,
+                games: sql`greatest(${teamRatings.games} - 1, 0)`,
+              },
+        )
+        .where(eq(teamRatings.teamId, t.teamId));
+    }
   }
 
   // ---------- helpers ----------
 
   private async match(matchId: string) {
     const [m] = await this.db
-      .select({ id: matches.id, hostId: matches.hostId, endAt: matches.endAt, status: matches.status })
+      .select({
+        id: matches.id,
+        hostId: matches.hostId,
+        endAt: matches.endAt,
+        status: matches.status,
+        homeTeamId: matches.homeTeamId,
+        awayTeamId: matches.awayTeamId,
+      })
       .from(matches)
       .where(eq(matches.id, matchId));
     if (!m) throw new ResultError('NOT_FOUND', 'Match not found.');

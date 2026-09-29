@@ -36,6 +36,8 @@ import { PhotosService } from './vendors/photos.service.js';
 import { PlayersService } from './ratings/players.service.js';
 import { AdminResultsController, RatingsController } from './ratings/ratings.controller.js';
 import { ResultsService } from './ratings/results.service.js';
+import { AdminTeamsController, TeamsController } from './teams/teams.controller.js';
+import { TeamsService } from './teams/teams.service.js';
 import { VendorsController, VenuePhotosController } from './vendors/vendors.controller.js';
 import { VendorsService } from './vendors/vendors.service.js';
 import { ProfileService } from './users/profile.service.js';
@@ -61,6 +63,8 @@ import { HealthController } from './health/health.controller.js';
     VenuePhotosController,
     RatingsController,
     AdminResultsController,
+    TeamsController,
+    AdminTeamsController,
     CalendarController,
     MatchesController,
     ChatController,
@@ -80,6 +84,7 @@ import { HealthController } from './health/health.controller.js';
     PhotosService,
     ResultsService,
     PlayersService,
+    TeamsService,
     CalendarService,
     MatchesService,
     ChatService,

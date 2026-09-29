@@ -560,6 +560,10 @@ export const matches = pgTable(
     filters: jsonb('filters').notNull().default({}), // rating range, age range, gender, verifiedOnly
     status: matchStatus('status').notNull().default('open'),
     joinCutoffAt: ts('join_cutoff_at'),
+    // Team matches (spec 12.1): the host's team, and the opponent once a team takes up the challenge.
+    homeTeamId: uuid('home_team_id').references(() => teams.id),
+    awayTeamId: uuid('away_team_id').references(() => teams.id),
+    challengedTeamId: uuid('challenged_team_id').references(() => teams.id), // null = open to any team
     ...timestamps,
   },
   (t) => [uniqueIndex('matches_booking_uq').on(t.bookingId)], // one match per booking
@@ -627,6 +631,62 @@ export const messages = pgTable(
   (t) => [index('messages_conversation_created_idx').on(t.conversationId, t.createdAt)],
 );
 
+// ---------- Teams (spec 12.1) ----------
+export const teamRole = pgEnum('team_role', ['captain', 'vice_captain', 'member']);
+export const teamMemberStatus = pgEnum('team_member_status', ['invited', 'active', 'declined', 'left', 'removed']);
+
+export const teams = pgTable(
+  'teams',
+  {
+    id: id(),
+    sportId: uuid('sport_id')
+      .notNull()
+      .references(() => sports.id),
+    name: text('name').notNull(),
+    city: text('city'),
+    captainId: uuid('captain_id')
+      .notNull()
+      .references(() => users.id),
+    status: text('status').notNull().default('active'), // active | disbanded
+    ...timestamps,
+  },
+  (t) => [index('teams_sport_idx').on(t.sportId, t.status)],
+);
+
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    role: teamRole('role').notNull().default('member'),
+    status: teamMemberStatus('status').notNull().default('invited'),
+    invitedBy: uuid('invited_by').references(() => users.id),
+    ...timestamps,
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_members_user_idx').on(t.userId)],
+);
+
+// A team's own Glicko-2 rating per sport, updated from team match results (spec 11.3).
+export const teamRatings = pgTable(
+  'team_ratings',
+  {
+    teamId: uuid('team_id')
+      .primaryKey()
+      .references(() => teams.id),
+    rating: doublePrecision('rating').notNull(),
+    deviation: doublePrecision('deviation').notNull(),
+    volatility: doublePrecision('volatility').notNull(),
+    games: integer('games').notNull().default(0),
+    lastPlayedAt: ts('last_played_at'),
+    ...timestamps,
+  },
+  (t) => [index('team_ratings_rating_idx').on(t.rating)],
+);
+
 // ---------- Results, ratings and reviews (spec 11) ----------
 export const resultStatus = pgEnum('result_status', ['pending', 'confirmed', 'disputed', 'voided']);
 export const resultOutcome = pgEnum('result_outcome', ['a', 'b', 'draw']);
@@ -652,6 +712,7 @@ export const matchResults = pgTable(
     disputeNote: text('dispute_note'),
     decidedBy: uuid('decided_by'), // admin who settled a dispute or voided it
     ratedAt: ts('rated_at'), // ratings applied
+    teamChanges: jsonb('team_changes'), // team matches: [{ teamId, before, after }], so a void can undo them
     ...timestamps,
   },
   (t) => [
@@ -761,9 +822,7 @@ export const notifications = pgTable(
 // ---------- Trust and safety ----------
 export const reports = pgTable('reports', {
   id: id(),
-  reporterId: uuid('reporter_id')
-    .notNull()
-    .references(() => users.id),
+  reporterId: uuid('reporter_id').references(() => users.id), // null = raised by the system
   targetType: text('target_type').notNull(), // user | venue | message | review | match
   targetId: uuid('target_id').notNull(),
   reason: text('reason').notNull(),

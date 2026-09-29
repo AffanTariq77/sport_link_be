@@ -573,7 +573,7 @@ export class AdminService {
           reporterName: users.name,
         })
         .from(reports)
-        .innerJoin(users, eq(users.id, reports.reporterId))
+        .leftJoin(users, eq(users.id, reports.reporterId)) // system reports have no reporter
         .where(inArray(reports.status, status))
         // Reports involving minors go to the top of the queue (Foundation 10.2).
         .orderBy(desc(reports.involvesMinor), reports.createdAt)

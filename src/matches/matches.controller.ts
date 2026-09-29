@@ -60,8 +60,11 @@ const CreateBody = z
     slotsTotal: z.int().min(2).max(40),
     hostBrings: z.int().min(1).max(39),
     filters: Filters.default({}),
+    teamId: z.uuid().optional().meta({ description: 'Team match: your team' }),
+    opponentTeamId: z.uuid().optional().meta({ description: 'Team to challenge; leave out to let any team accept' }),
   })
   .meta({ id: 'CreateMatch' });
+const TeamRef = z.object({ id: z.uuid(), name: z.string() });
 const Summary = z
   .object({
     id: z.uuid(),
@@ -80,6 +83,10 @@ const Summary = z
     venue: z.object({ name: z.string(), detail: z.string() }),
     pricePerPlayer: z.int().nullable(),
     currency: z.string().nullable(),
+    teams: z
+      .object({ home: TeamRef.nullable(), away: TeamRef.nullable(), challenged: TeamRef.nullable() })
+      .nullable()
+      .meta({ description: 'Set for team matches' }),
   })
   .meta({ id: 'MatchSummary' });
 const Detail = Summary.extend({
@@ -211,6 +218,18 @@ export class MatchesController {
   @ApiOkResponse({ standardSchema: z.object({ status: z.enum(matchStatus.enumValues) }) })
   cancel(@Req() req: AuthedRequest, @Param('id', { schema: Id }) id: string) {
     return run(() => this.matches.cancel(req.auth.user.id, id));
+  }
+
+  @UseGuards(UnlockedGuard)
+  @Post(':id/challenge')
+  @HttpCode(200)
+  @ApiOkResponse({ standardSchema: z.object({ id: z.uuid(), awayTeamId: z.uuid() }) })
+  acceptChallenge(
+    @Req() req: AuthedRequest,
+    @Param('id', { schema: Id }) id: string,
+    @Body({ schema: z.object({ teamId: z.uuid() }).meta({ id: 'AcceptChallenge' }) }) body: { teamId: string },
+  ) {
+    return run(() => this.matches.acceptChallenge(req.auth.user.id, id, body.teamId));
   }
 
   @Get(':id/pay')

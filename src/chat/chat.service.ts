@@ -15,6 +15,8 @@ import {
   messages,
   reports,
   sports,
+  teamMembers,
+  teams,
   users,
 } from '../db/schema.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
@@ -48,6 +50,12 @@ export class ChatService {
     return { id: await this.getOrCreate('match', matchId) };
   }
 
+  /** Team chat: every active member (spec 10). */
+  async openTeam(userId: string, teamId: string) {
+    await this.assertTeamMember(userId, teamId);
+    return { id: await this.getOrCreate('team', teamId) };
+  }
+
   /** Player and venue chat about a booking. The venue side is anyone who can see the venue's calendar. */
   async openBooking(userId: string, bookingId: string) {
     await this.assertBookingMember(userId, bookingId);
@@ -62,6 +70,10 @@ export class ChatService {
       .leftJoin(matchPlayers, and(eq(matchPlayers.matchId, matches.id), eq(matchPlayers.userId, userId)))
       .where(or(eq(matches.hostId, userId), inArray(matchPlayers.status, [...PLAYING])));
     const bookingIds = this.db.select({ id: bookings.id }).from(bookings).where(eq(bookings.createdBy, userId));
+    const teamIds = this.db
+      .select({ id: teamMembers.teamId })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.userId, userId), eq(teamMembers.status, 'active')));
     // Venue side: booking chats at every branch whose calendar this user can see.
     const { branchIds } = await vendorAccess(this.db, userId, 'view_bookings');
     const venueBookingIds = this.db
@@ -89,6 +101,7 @@ export class ChatService {
         or(
           and(eq(conversations.type, 'match'), inArray(conversations.refId, matchIds)),
           and(eq(conversations.type, 'booking'), inArray(conversations.refId, bookingIds)),
+          and(eq(conversations.type, 'team'), inArray(conversations.refId, teamIds)),
           and(eq(conversations.type, 'booking'), inArray(conversations.refId, venueBookingIds)),
           sql`${conversationMembers.userId} is not null`,
         ),
@@ -223,7 +236,13 @@ export class ChatService {
   /** Everyone in the chat except the sender and anyone who has blocked them. */
   private async recipients(c: typeof conversations.$inferSelect, senderId: string) {
     let ids: string[] = [];
-    if (c.type === 'match') {
+    if (c.type === 'team') {
+      const members = await this.db
+        .select({ id: teamMembers.userId })
+        .from(teamMembers)
+        .where(and(eq(teamMembers.teamId, c.refId!), eq(teamMembers.status, 'active')));
+      ids = members.map((x) => x.id);
+    } else if (c.type === 'match') {
       const [m] = await this.db.select({ hostId: matches.hostId }).from(matches).where(eq(matches.id, c.refId!));
       const players = await this.db
         .select({ id: matchPlayers.userId })
@@ -284,7 +303,7 @@ export class ChatService {
 
   // ---------- access ----------
 
-  private async getOrCreate(type: 'match' | 'booking', refId: string) {
+  private async getOrCreate(type: 'match' | 'booking' | 'team', refId: string) {
     const [existing] = await this.db
       .select({ id: conversations.id })
       .from(conversations)
@@ -305,6 +324,7 @@ export class ChatService {
     if (!c?.refId) throw new ChatError('NOT_FOUND', 'Chat not found.');
     if (c.type === 'match') await this.assertMatchMember(userId, c.refId);
     else if (c.type === 'booking') await this.assertBookingMember(userId, c.refId);
+    else if (c.type === 'team') await this.assertTeamMember(userId, c.refId);
     else throw new ChatError('NOT_FOUND', 'Chat not found.');
     return c;
   }
@@ -318,6 +338,22 @@ export class ChatService {
     const ok =
       m && (m.hostId === userId || (m.playerStatus && (PLAYING as readonly string[]).includes(m.playerStatus)));
     if (!ok) throw new ChatError('NOT_FOUND', 'Chat not found.');
+  }
+
+  private async assertTeamMember(userId: string, teamId: string) {
+    const [m] = await this.db
+      .select({ userId: teamMembers.userId })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(
+        and(
+          eq(teamMembers.teamId, teamId),
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.status, 'active'),
+          eq(teams.status, 'active'),
+        ),
+      );
+    if (!m) throw new ChatError('NOT_FOUND', 'Chat not found.');
   }
 
   private async assertBookingMember(userId: string, bookingId: string) {
@@ -363,7 +399,13 @@ export class ChatService {
           .innerJoin(branches, eq(branches.id, courts.branchId))
           .where(inArray(bookings.id, bookingRefs))
       : [];
+    const teamRefs = rows.filter((r) => r.type === 'team').map((r) => r.refId!);
+    const ts = teamRefs.length
+      ? await this.db.select({ id: teams.id, name: teams.name }).from(teams).where(inArray(teams.id, teamRefs))
+      : [];
     for (const r of rows) {
+      const t = ts.find((x) => x.id === r.refId);
+      if (t) out.set(r.id, `Team · ${t.name}`);
       const m = ms.find((x) => x.id === r.refId);
       const b = bs.find((x) => x.id === r.refId);
       if (m) out.set(r.id, `${m.sport} match · ${m.venue}`);
