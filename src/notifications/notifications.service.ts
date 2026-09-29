@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, arrayContains, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
 import type { Db } from '../db/client.js';
-import { devices, notifications, vendors, vendorStaff } from '../db/schema.js';
+import { devices, notifications, users, vendors, vendorStaff } from '../db/schema.js';
+import { getSetting } from '../settings.js';
 import type { StaffPermission } from '../vendors/access.js';
 import { PUSH, type PushSender } from './push.js';
 
@@ -95,6 +96,33 @@ export class NotificationsService {
             ),
           );
       }
+    } catch (err) {
+      this.log.error(err);
+    }
+  }
+
+  /**
+   * Foundation 10.2: the guardian hears about every booking, match and team their child joins (setting
+   * minors.notify_guardian). Does nothing for adults or minors without a consenting guardian.
+   */
+  async tellGuardian(userId: string, what: string, link?: string) {
+    try {
+      const [u] = await this.db
+        .select({
+          name: users.name,
+          isMinor: users.isMinor,
+          guardian: users.guardianUserId,
+          consent: users.guardianConsentAt,
+        })
+        .from(users)
+        .where(eq(users.id, userId));
+      if (!u?.isMinor || !u.guardian || !u.consent || !(await getSetting(this.db, 'minors.notify_guardian'))) return;
+      await this.notify(u.guardian, {
+        kind: 'guardian',
+        title: `${u.name ?? 'Your child'}: ${what}`,
+        body: `${u.name ?? 'Your child'} ${what.charAt(0).toLowerCase()}${what.slice(1)}. See their activity in SportsLink.`,
+        link: link ?? `/family/${userId}`,
+      });
     } catch (err) {
       this.log.error(err);
     }

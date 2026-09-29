@@ -172,6 +172,7 @@ export class PaymentsService {
           body: 'Your slot is booked. Pay at the venue.',
           link: '/bookings',
         });
+        await this.notes?.tellGuardian(userId, 'Booked a slot');
       } else if (this.notes) {
         await this.notes.notify(
           await this.notes.vendorRecipients(booking.vendorId, 'confirm_payments', booking.branchId),
@@ -420,6 +421,7 @@ export class PaymentsService {
             link: '/bookings',
           },
     );
+    await this.notes?.tellGuardian(done.playerId, done.matchId ? 'Confirmed a place in a match' : 'Booked a slot');
     return { id: done.id };
   }
 

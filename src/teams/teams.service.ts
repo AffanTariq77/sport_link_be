@@ -244,6 +244,7 @@ export class TeamsService {
         link: `/teams/${teamId}`,
         refId: teamId,
       });
+      await this.notes?.tellGuardian(userId, `Joined the team ${m.name}`);
     }
     return { ok: true };
   }

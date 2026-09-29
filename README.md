@@ -3,6 +3,8 @@
 Backend for SportsLink: venue booking, matches, Find Players, ratings and tournaments.
 NestJS 12, PostgreSQL 16 with PostGIS, Drizzle ORM, TypeScript (ESM).
 
+What you need to supply to run and deploy, and what is still mocked: see [DEVELOPER_INPUT.md](DEVELOPER_INPUT.md).
+
 ## Requirements
 
 Node.js 22 or later, pnpm 9, Docker.

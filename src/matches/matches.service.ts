@@ -396,6 +396,8 @@ export class MatchesService {
         body: body[result.status]!,
         link: `/matches/${matchId}`,
       });
+      if (result.status === 'approved' || result.status === 'confirmed')
+        await this.notes.tellGuardian(playerId, `Joined a match: ${text}`);
     }
     return result;
   }

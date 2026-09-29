@@ -488,28 +488,36 @@ export const bookings = pgTable(
     cancelReason: text('cancel_reason'),
     ...timestamps,
   },
-  (t) => [index('bookings_court_start_idx').on(t.courtId, t.startAt)],
+  (t) => [
+    index('bookings_court_start_idx').on(t.courtId, t.startAt),
+    index('bookings_created_by_idx').on(t.createdBy, t.startAt),
+    index('bookings_series_idx').on(t.recurringSeriesId),
+  ],
 );
 
-export const bookingShares = pgTable('booking_shares', {
-  id: id(),
-  bookingId: uuid('booking_id')
-    .notNull()
-    .references(() => bookings.id),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id),
-  playersCovered: smallint('players_covered').notNull().default(1),
-  amount: money('amount').notNull(),
-  advanceAmount: money('advance_amount').notNull(),
-  method: paymentMethod('method'),
-  txnReference: text('txn_reference'),
-  status: shareStatus('status').notNull().default('pending'),
-  confirmedBy: uuid('confirmed_by'),
-  confirmedAt: ts('confirmed_at'),
-  dueAt: ts('due_at'),
-  ...timestamps,
-});
+export const bookingShares = pgTable(
+  'booking_shares',
+  {
+    id: id(),
+    bookingId: uuid('booking_id')
+      .notNull()
+      .references(() => bookings.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    playersCovered: smallint('players_covered').notNull().default(1),
+    amount: money('amount').notNull(),
+    advanceAmount: money('advance_amount').notNull(),
+    method: paymentMethod('method'),
+    txnReference: text('txn_reference'),
+    status: shareStatus('status').notNull().default('pending'),
+    confirmedBy: uuid('confirmed_by'),
+    confirmedAt: ts('confirmed_at'),
+    dueAt: ts('due_at'),
+    ...timestamps,
+  },
+  (t) => [index('booking_shares_booking_idx').on(t.bookingId), index('booking_shares_status_idx').on(t.status)],
+);
 
 export const refundStatus = pgEnum('refund_status', ['due', 'sent', 'received', 'disputed']);
 
@@ -536,7 +544,7 @@ export const refunds = pgTable(
     confirmedAt: ts('confirmed_at'),
     ...timestamps,
   },
-  (t) => [uniqueIndex('refunds_share_uq').on(t.shareId)],
+  (t) => [uniqueIndex('refunds_share_uq').on(t.shareId), index('refunds_user_idx').on(t.userId)],
 );
 
 // ---------- Matches ----------
@@ -568,7 +576,11 @@ export const matches = pgTable(
     challengedTeamId: uuid('challenged_team_id').references(() => teams.id), // null = open to any team
     ...timestamps,
   },
-  (t) => [uniqueIndex('matches_booking_uq').on(t.bookingId)], // one match per booking
+  (t) => [
+    uniqueIndex('matches_booking_uq').on(t.bookingId), // one match per booking
+    index('matches_status_start_idx').on(t.status, t.startAt),
+    index('matches_host_idx').on(t.hostId),
+  ],
 );
 
 export const matchPlayers = pgTable(
@@ -585,7 +597,7 @@ export const matchPlayers = pgTable(
     shareId: uuid('share_id').references(() => bookingShares.id),
     ...timestamps,
   },
-  (t) => [primaryKey({ columns: [t.matchId, t.userId] })],
+  (t) => [primaryKey({ columns: [t.matchId, t.userId] }), index('match_players_user_idx').on(t.userId, t.status)],
 );
 
 // ---------- Chat ----------

@@ -135,3 +135,26 @@ describe('guardian consent', () => {
     expect(bform!.status).toBe('rejected');
   });
 });
+
+describe('guardian alerts (Foundation 10.2)', () => {
+  it('the guardian hears when their child joins a team; adults trigger nothing', async () => {
+    const { NotificationsService } = await import('../src/notifications/notifications.service.js');
+    const { TeamsService } = await import('../src/teams/teams.service.js');
+    const notes = new NotificationsService(db, { send: async () => undefined });
+    const teams = new TeamsService(db, notes);
+    const minor = await signUp('2014-07-07');
+    const parent = await signUp('1982-07-07');
+    await guardians.requestGuardian(minor.id, parent.phone);
+    await approveCnic(parent.id);
+    await guardians.decide(parent.id, minor.id, { accept: true, version: (await guardians.consentText()).version });
+    const captain = await signUp('1990-01-01');
+    const { id } = await teams.create(captain.id, { sport: 'padel', name: 'Junior Squad' });
+    await teams.invite(captain.id, id, minor.phone);
+    await teams.respond(minor.id, id, true);
+    expect((await notes.list(parent.id)).items.map((n) => n.title)).toContain(
+      'Test Person: Joined the team Junior Squad',
+    );
+    await notes.tellGuardian(captain.id, 'Booked a slot');
+    expect((await notes.list(captain.id)).items.filter((n) => n.kind === 'guardian')).toEqual([]);
+  });
+});
