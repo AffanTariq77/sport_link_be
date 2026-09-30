@@ -77,6 +77,10 @@ Only these values are needed. Everything else has a working default.
 - [ ] `API_URL` (web and admin): the deployed API address, reachable from the Next.js servers.
 - [ ] An SMS provider account and the adapter for it (see Known limitations: this needs code, not only a key).
 - [ ] The first real admin, created with `pnpm admin:create` (no variable; see below).
+- [ ] Map tiles for the web Find Players map: a keyed tile provider (MapTiler, Stadia or similar). OpenStreetMap's public
+      tiles are for light use only; the URL is `TILES` in `apps/web/src/app/find-players/map.tsx`.
+- [ ] Google Maps Android API key for development and store builds of the mobile map (`react-native-maps`): add the
+      `react-native-maps` plugin with `androidGoogleMapsApiKey` to `apps/mobile/app.json`. Expo Go needs none; iOS uses Apple Maps.
 
 ---
 
